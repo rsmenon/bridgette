@@ -237,4 +237,5 @@ mod tests {
             Card::new(Suit::Spades, Rank::Ace)
         );
     }
+
 }

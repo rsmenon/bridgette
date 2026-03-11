@@ -1,12 +1,12 @@
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Cell, Padding, Paragraph, Row, Table};
+use ratatui::widgets::{Block, Cell, Padding, Paragraph, Row, Table, Wrap};
 use ratatui::Frame;
 
 use crate::engine::card::Suit;
 use crate::engine::hand::Hand;
-use crate::types::{Phase, Seat};
+use crate::types::{Phase, Seat, Vulnerability};
 
 use super::bidding_panel::render_bidding_history;
 use super::palette::*;
@@ -72,21 +72,35 @@ fn render_stats_panel(f: &mut Frame, area: Rect, state: &AppState) {
     let label_style = Style::default().fg(TEXT_LIGHT_MUTED);
     let value_style = Style::default().fg(TEXT_LIGHT);
 
-    let not_started = state.game.hands.iter().all(|h| h.is_empty());
-    let (status_str, status_color) = if not_started {
-        ("Not Started", TEXT_LIGHT_MUTED)
-    } else {
-        match state.game.phase {
-            Phase::Bidding => ("Auction", ACCENT_TEAL),
-            Phase::Playing => ("Play", ACCENT_TEAL),
-            Phase::Finished => ("Completed", ACCENT_GREEN),
+    let (status_str, status_color) = match state.game.phase {
+        Phase::Finished => ("Completed", ACCENT_GREEN),
+        Phase::Playing => ("Play", ACCENT_TEAL),
+        Phase::Bidding => {
+            if state.game.hands.iter().all(|h| h.is_empty()) {
+                ("Not Started", TEXT_LIGHT_MUTED)
+            } else {
+                ("Auction", ACCENT_TEAL)
+            }
         }
     };
+
+    let vul = state.game.vulnerability;
+    let vul_str = match vul {
+        Vulnerability::None => "None",
+        Vulnerability::NorthSouth => "N/S",
+        Vulnerability::EastWest => "E/W",
+        Vulnerability::Both => "Both",
+    };
+    let vul_color = if vul == Vulnerability::None { TEXT_LIGHT_MUTED } else { ACCENT_RED };
 
     let mut table_rows = vec![
         Row::new(vec![
             Cell::from("Dealer").style(label_style),
             Cell::from(format!("{}", state.game.dealer)).style(value_style),
+        ]),
+        Row::new(vec![
+            Cell::from("Vul").style(label_style),
+            Cell::from(vul_str).style(Style::default().fg(vul_color)),
         ]),
         Row::new(vec![
             Cell::from("Status").style(label_style),
@@ -133,6 +147,7 @@ fn render_stats_panel(f: &mut Frame, area: Rect, state: &AppState) {
         Cell::from(state.bidding_system.as_str()).style(value_style),
     ]));
 
+    let not_started = state.game.phase == Phase::Bidding && state.game.hands.iter().all(|h| h.is_empty());
     if state.game.phase != Phase::Finished && !not_started {
         table_rows.push(Row::new(vec![
             Cell::from("Turn").style(label_style),
@@ -197,7 +212,7 @@ fn render_error_corner(f: &mut Frame, area: Rect, state: &AppState) {
         })
         .collect();
 
-    let para = Paragraph::new(lines);
+    let para = Paragraph::new(lines).wrap(Wrap { trim: false });
     f.render_widget(para, inner);
 }
 

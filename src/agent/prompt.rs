@@ -2,7 +2,7 @@ use crate::engine::bidding::{Bid, BidSuit};
 use crate::engine::card::{Card, Rank, Suit};
 use crate::engine::contract::Contract;
 use crate::engine::hand::Hand;
-use crate::types::Seat;
+use crate::types::{Seat, Vulnerability};
 
 /// Owned snapshot of the game state visible to a particular seat.
 #[derive(Debug, Clone)]
@@ -11,6 +11,7 @@ pub struct AgentGameView {
     pub hand: Hand,
     pub dummy_hand: Option<Hand>,
     pub dealer: Seat,
+    pub vulnerability: Vulnerability,
     pub bidding_history: Vec<(Seat, Bid)>,
     pub valid_bids: Vec<Bid>,
     pub contract: Option<Contract>,
@@ -87,22 +88,40 @@ pub fn build_system_prompt(
         None => "bidder",
     };
 
+    let is_playing = contract.is_some();
+
     match custom_instructions {
-        Some(instructions) => format!(
-            "You are an expert bridge player sitting {seat}. You are the {role}.\n\
-             Respond with ONLY your action — a bid (e.g., 1S, 2NT, Pass, Double, Redouble) or a card (e.g., AS, TH, 4D).\n\
-             Do not explain your reasoning. Just output the action.\n\
-             \n\
-             {instructions}"
-        ),
-        None => format!(
-            "You are an expert bridge player sitting {seat}. You are the {role}.\n\
-             You MUST strictly follow Standard American Yellow Card (SAYC) conventions.\n\
-             Respond with ONLY your action — a bid (e.g., 1S, 2NT, Pass, Double, Redouble) or a card (e.g., AS, TH, 4D).\n\
-             Do not explain your reasoning. Just output the action.\n\
-             \n\
-             {SAYC_REFERENCE}"
-        ),
+        Some(instructions) => {
+            let play_ref = if is_playing {
+                format!("\n\n{CARD_PLAY_REFERENCE}")
+            } else {
+                String::new()
+            };
+            format!(
+                "You are an expert bridge player sitting {seat}. You are the {role}.\n\
+                 Think hard and consider strategies to win the game before responding.\n\
+                 Respond with ONLY your action — a bid (e.g., 1S, 2NT, Pass, Double, Redouble) or a card (e.g., AS, TH, 4D).\n\
+                 Do not explain your reasoning. Just output the action.\n\
+                 \n\
+                 {instructions}{play_ref}"
+            )
+        }
+        None => {
+            let reference = if is_playing {
+                format!("{SAYC_REFERENCE}\n\n{CARD_PLAY_REFERENCE}")
+            } else {
+                SAYC_REFERENCE.to_string()
+            };
+            format!(
+                "You are an expert bridge player sitting {seat}. You are the {role}.\n\
+                 You MUST strictly follow Standard American Yellow Card (SAYC) conventions.\n\
+                 Think hard and consider strategies to win the game before responding.\n\
+                 Respond with ONLY your action — a bid (e.g., 1S, 2NT, Pass, Double, Redouble) or a card (e.g., AS, TH, 4D).\n\
+                 Do not explain your reasoning. Just output the action.\n\
+                 \n\
+                 {reference}"
+            )
+        }
     }
 }
 
@@ -164,16 +183,80 @@ SLAM CONVENTIONS:
 - GERBER (4C over NT opening/rebid): asks for aces. 4D=0/4, 4H=1, 4S=2, 4NT=3.
 
 COMPETITIVE BIDDING:
-- Simple overcall: 8-16 HCP, 5+ card suit
+- Simple overcall: 8-16 HCP, 5+ card suit. Do NOT overcall with only 4 cards in the suit.
 - 1NT overcall: 15-18 HCP, balanced, stopper in opener's suit
 - Takeout double: support for unbid suits, 12+ HCP (or any 18+)
 - Negative double (by responder after overcall): 7+ HCP, 4+ in unbid major(s)
 - Michaels cuebid: 5-5+ two-suiter. Over minor: both majors. Over major: other major + a minor.
-- Unusual 2NT: 5-5+ in two lowest unbid suits";
+- Unusual 2NT: 5-5+ in two lowest unbid suits
+
+RESPONDING TO PARTNER'S OVERCALL:
+- Single raise: 8-10 support points, 3+ card support. Do NOT raise with fewer than 3 cards.
+- Jump raise: 11-12 support points, 3+ card support, invitational
+- New suit: 10+ HCP, 5+ cards, forcing one round
+- 1NT response: 10-12 HCP, stopper in opener's suit
+- Cuebid of opener's suit: 12+ HCP, 3+ card support, game-forcing raise
+- Pass: default with no fit and no suit to bid. Do not stretch to raise with a singleton or doubleton.";
+
+pub const CARD_PLAY_REFERENCE: &str = "\
+=== CARD PLAY PRINCIPLES ===
+
+These are strong defaults. Violate them only with a clear reason (entry management,
+endplay, deception, etc.). When in doubt, follow the principle.
+
+FUNDAMENTAL RULES:
+- Do not waste winners: do not discard an ace or established winner when you have losers to discard.
+  Exception: overtaking partner's winner to gain the lead for an important continuation.
+- When your side has already won the current trick, play your lowest card.
+  Exception: overtake to gain the lead when you have a critical continuation.
+- When trumping (ruffing), use a trump HIGH ENOUGH to prevent an overtrump. If an opponent
+  might overtrump, ruff with a high trump — not your lowest.
+- Second hand low, third hand high (general guideline for defenders).
+  Exceptions: split honors in second seat, or third hand finesse when appropriate.
+- Fourth hand (last to play): win the trick with the cheapest card that wins. You can see
+  all cards played — if you can beat what's on the table, do so. Do not duck.
+- Cover an honor with an honor when it can promote a card in your hand or partner's.
+
+DECLARER PLAY:
+- Count your winners and losers before playing to trick 1.
+- Draw trumps early unless you need to ruff in the short hand first or need dummy entries.
+- When playing from dummy, win with the CHEAPEST card that wins the trick.
+- Win tricks you can win unless you have a specific plan (hold-up, duck to maintain
+  communication, endplay). Do not duck without a reason.
+- Play aces to capture opposing high cards, not on tricks with only low cards.
+- Manage entries between your hand and dummy. Plan the order of play to preserve them.
+
+DEFENDER PLAY:
+- Lead partner's bid suit unless you have a clearly better alternative.
+- Return partner's led suit when you gain the lead, unless you have a clearly better plan.
+- Lead top of a sequence (KQJ, QJT, etc.).
+- Lead 4th best from your longest suit against NT contracts.
+- Against trump contracts, consider leading a singleton for a ruff.
+- Signal honestly: high card = encouraging, low card = discouraging.
+
+DISCARDING:
+- Do not discard winners (aces, established cards, guarded kings) unless necessary for
+  an endplay or to create an entry. Discard from your weakest suit first.
+- Keep length parity with dummy: if dummy has 3 cards in a suit, try to keep at least 3.
+- Protect your high cards: do not bare a king or unguard a queen without reason.
+
+DUMMY PLAY (declarer playing from dummy):
+- Win with the cheapest winning card from dummy.
+- If your hand already wins the trick, play LOW from dummy unless overtaking for entry.
+- Use dummy's entries carefully — do not strand winners in dummy.";
 
 pub fn build_bidding_prompt(view: &AgentGameView) -> String {
     let mut lines = Vec::new();
     lines.push(format!("You are {} (dealer: {})", view.seat, view.dealer));
+    let vul_str = match view.vulnerability {
+        Vulnerability::None => "None vulnerable".to_string(),
+        Vulnerability::Both => "Both vulnerable".to_string(),
+        vul => {
+            let who = if vul.is_vulnerable(view.seat) { "You are" } else { "Opponents are" };
+            format!("{} vulnerable ({})", who, vul)
+        }
+    };
+    lines.push(format!("Vulnerability: {}", vul_str));
     lines.push(String::new());
     lines.push("Your hand:".to_string());
     lines.push(hand_ascii(&view.hand));
@@ -385,6 +468,12 @@ pub fn build_play_prompt(view: &AgentGameView) -> String {
             "Contract: {}{} {} by {}",
             contract.level, doubled, suit_str, contract.declarer
         ));
+        let vul_str = if view.vulnerability.is_vulnerable(contract.declarer) {
+            "Declarer vulnerable"
+        } else {
+            "Declarer not vulnerable"
+        };
+        lines.push(format!("Vulnerability: {}", vul_str));
     }
 
     // Bidding sequence

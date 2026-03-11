@@ -651,13 +651,13 @@ fn play_wrong_turn_rejected() {
 
 #[test]
 fn game_starts_in_bidding_phase() {
-    let game = super::game::Game::new(Seat::North);
+    let game = super::game::Game::new(Seat::North, crate::types::Vulnerability::None);
     assert_eq!(game.phase, Phase::Bidding);
 }
 
 #[test]
 fn game_passed_out_goes_to_finished() {
-    let mut game = super::game::Game::new(Seat::North);
+    let mut game = super::game::Game::new(Seat::North, crate::types::Vulnerability::None);
     for _ in 0..4 {
         game.place_bid(Bid::Pass).unwrap();
     }
@@ -668,7 +668,7 @@ fn game_passed_out_goes_to_finished() {
 
 #[test]
 fn game_bid_then_play_transition() {
-    let mut game = super::game::Game::new(Seat::North);
+    let mut game = super::game::Game::new(Seat::North, crate::types::Vulnerability::None);
     // N: 1NT, E: Pass, S: Pass, W: Pass
     game.place_bid(Bid::Suit(1, BidSuit::NoTrump)).unwrap();
     game.place_bid(Bid::Pass).unwrap();
@@ -683,7 +683,7 @@ fn game_bid_then_play_transition() {
 
 #[test]
 fn game_cannot_bid_during_play() {
-    let mut game = super::game::Game::new(Seat::North);
+    let mut game = super::game::Game::new(Seat::North, crate::types::Vulnerability::None);
     game.place_bid(Bid::Suit(1, BidSuit::NoTrump)).unwrap();
     game.place_bid(Bid::Pass).unwrap();
     game.place_bid(Bid::Pass).unwrap();
@@ -717,7 +717,7 @@ fn opening_leader_is_left_of_declarer() {
 
 #[test]
 fn dummy_not_revealed_before_opening_lead() {
-    let mut game = super::game::Game::new(Seat::North);
+    let mut game = super::game::Game::new(Seat::North, crate::types::Vulnerability::None);
     game.place_bid(Bid::Suit(1, BidSuit::NoTrump)).unwrap();
     game.place_bid(Bid::Pass).unwrap();
     game.place_bid(Bid::Pass).unwrap();
@@ -729,7 +729,7 @@ fn dummy_not_revealed_before_opening_lead() {
 #[test]
 fn dummy_revealed_after_opening_lead() {
     // We need to construct a game where we control the hands to make a valid play
-    let mut game = super::game::Game::new(Seat::North);
+    let mut game = super::game::Game::new(Seat::North, crate::types::Vulnerability::None);
     game.deal_cards();
     game.place_bid(Bid::Suit(1, BidSuit::NoTrump)).unwrap();
     game.place_bid(Bid::Pass).unwrap();
@@ -756,13 +756,13 @@ fn dummy_revealed_after_opening_lead() {
 
 #[test]
 fn south_hand_always_visible() {
-    let game = super::game::Game::new(Seat::North);
+    let game = super::game::Game::new(Seat::North, crate::types::Vulnerability::None);
     assert!(game.is_hand_visible(Seat::South));
 }
 
 #[test]
 fn dummy_visible_after_reveal() {
-    let mut game = super::game::Game::new(Seat::North);
+    let mut game = super::game::Game::new(Seat::North, crate::types::Vulnerability::None);
     game.deal_cards();
     game.place_bid(Bid::Suit(1, BidSuit::NoTrump)).unwrap();
     game.place_bid(Bid::Pass).unwrap();
@@ -1029,4 +1029,74 @@ fn declarer_changes_denomination() {
         "South was first NS to bid Spades"
     );
     assert_eq!(contract.dummy, Seat::North);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 16. VULNERABILITY (Chicago-style)
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn chicago_vulnerability_deal_0_none() {
+    use crate::types::Vulnerability;
+    let vul = Vulnerability::chicago(0, Seat::North);
+    assert_eq!(vul, Vulnerability::None);
+    assert!(!vul.is_vulnerable(Seat::North));
+    assert!(!vul.is_vulnerable(Seat::East));
+}
+
+#[test]
+fn chicago_vulnerability_deal_1_dealer_side() {
+    use crate::types::Vulnerability;
+    // Deal 1 with NS dealer => N/S vulnerable
+    let vul = Vulnerability::chicago(1, Seat::North);
+    assert_eq!(vul, Vulnerability::NorthSouth);
+    assert!(vul.is_vulnerable(Seat::North));
+    assert!(vul.is_vulnerable(Seat::South));
+    assert!(!vul.is_vulnerable(Seat::East));
+
+    // Deal 1 with EW dealer => E/W vulnerable
+    let vul = Vulnerability::chicago(1, Seat::East);
+    assert_eq!(vul, Vulnerability::EastWest);
+    assert!(!vul.is_vulnerable(Seat::North));
+    assert!(vul.is_vulnerable(Seat::East));
+}
+
+#[test]
+fn chicago_vulnerability_deal_2_both() {
+    use crate::types::Vulnerability;
+    let vul = Vulnerability::chicago(2, Seat::South);
+    assert_eq!(vul, Vulnerability::Both);
+    assert!(vul.is_vulnerable(Seat::North));
+    assert!(vul.is_vulnerable(Seat::East));
+}
+
+#[test]
+fn chicago_vulnerability_deal_3_non_dealer_side() {
+    use crate::types::Vulnerability;
+    // Deal 3 with NS dealer => E/W vulnerable (non-dealer)
+    let vul = Vulnerability::chicago(3, Seat::South);
+    assert_eq!(vul, Vulnerability::EastWest);
+    assert!(!vul.is_vulnerable(Seat::South));
+    assert!(vul.is_vulnerable(Seat::East));
+
+    // Deal 3 with EW dealer => N/S vulnerable
+    let vul = Vulnerability::chicago(3, Seat::West);
+    assert_eq!(vul, Vulnerability::NorthSouth);
+    assert!(vul.is_vulnerable(Seat::North));
+    assert!(!vul.is_vulnerable(Seat::West));
+}
+
+#[test]
+fn chicago_vulnerability_wraps_at_4() {
+    use crate::types::Vulnerability;
+    // Deal 4 should be same as deal 0
+    assert_eq!(
+        Vulnerability::chicago(4, Seat::North),
+        Vulnerability::None
+    );
+    // Deal 5 same as deal 1
+    assert_eq!(
+        Vulnerability::chicago(5, Seat::North),
+        Vulnerability::chicago(1, Seat::North)
+    );
 }

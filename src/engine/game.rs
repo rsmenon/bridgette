@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::agent::prompt::AgentGameView;
-use crate::types::{Phase, Seat};
+use crate::types::{Phase, Seat, Vulnerability};
 
 use super::bidding::{Auction, Bid, BidSuit};
 use super::card::Card;
@@ -23,10 +23,12 @@ pub struct Game {
     pub dummy_revealed: bool,
     pub passed_out: bool,
     pub score: Option<Score>,
+    #[serde(default)]
+    pub vulnerability: Vulnerability,
 }
 
 impl Game {
-    pub fn new(dealer: Seat) -> Self {
+    pub fn new(dealer: Seat, vulnerability: Vulnerability) -> Self {
         let empty: [Hand; 4] = std::array::from_fn(|_| Hand::new(vec![]));
         Self {
             hands: empty.clone(),
@@ -39,12 +41,13 @@ impl Game {
             dummy_revealed: false,
             passed_out: false,
             score: None,
+            vulnerability,
         }
     }
 
     /// Create a game with pre-determined hands (for review/replay).
-    pub fn from_hands(dealer: Seat, hands: [Hand; 4]) -> Self {
-        let mut game = Self::new(dealer);
+    pub fn from_hands(dealer: Seat, hands: [Hand; 4], vulnerability: Vulnerability) -> Self {
+        let mut game = Self::new(dealer, vulnerability);
         game.dealt_hands = hands.clone();
         game.hands = hands;
         game
@@ -141,7 +144,8 @@ impl Game {
             } else {
                 play.ew_tricks
             };
-            self.score = Some(scoring::calculate_score(contract, declarer_tricks as u8));
+            let vulnerable = self.vulnerability.is_vulnerable(contract.declarer);
+            self.score = Some(scoring::calculate_score(contract, declarer_tricks as u8, vulnerable));
             self.phase = Phase::Finished;
         }
 
@@ -272,6 +276,7 @@ impl Game {
             hand,
             dummy_hand,
             dealer: self.dealer,
+            vulnerability: self.vulnerability,
             bidding_history: self.auction.bids.clone(),
             valid_bids: if self.phase == Phase::Bidding {
                 self.auction.valid_bids()

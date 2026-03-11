@@ -93,7 +93,8 @@ fn parse_hands_record(hr: &HandsRecord) -> [Hand; 4] {
 fn reconstruct_game_at_step(saved: &SavedGame, step: usize) -> Game {
     let dealer = saved.dealer.parse::<Seat>().unwrap_or(Seat::North);
     let hands = parse_hands_record(&saved.hands);
-    let mut game = Game::from_hands(dealer, hands);
+    let vulnerability = saved.vulnerability();
+    let mut game = Game::from_hands(dealer, hands, vulnerability);
 
     let num_bids = saved.bidding.len();
 
@@ -135,7 +136,8 @@ pub fn pre_step_game_and_seat(saved: &SavedGame, step: usize) -> (Game, Seat) {
     } else {
         let dealer = saved.dealer.parse::<Seat>().unwrap_or(Seat::North);
         let hands = parse_hands_record(&saved.hands);
-        Game::from_hands(dealer, hands)
+        let vulnerability = saved.vulnerability();
+        Game::from_hands(dealer, hands, vulnerability)
     };
     let seat = game.current_seat();
     (game, seat)

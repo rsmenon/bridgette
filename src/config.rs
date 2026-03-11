@@ -2,6 +2,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
+use crate::types::Vulnerability;
 
 fn config_dir() -> PathBuf {
     let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
@@ -247,6 +248,9 @@ pub struct SavedGame {
     /// When the game was completed (HH:MM:SS format).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ended_at: Option<String>,
+    /// Vulnerability for this deal. Defaults to None for old saves.
+    #[serde(default)]
+    pub vulnerability: Vulnerability,
 }
 
 impl SavedGame {
@@ -315,6 +319,11 @@ impl SavedGame {
         }
     }
 
+    /// Get vulnerability for this game.
+    pub fn vulnerability(&self) -> Vulnerability {
+        self.vulnerability
+    }
+
     /// Display-friendly local timestamp.
     pub fn timestamp_display(&self) -> String {
         // Try to parse ISO 8601 and format as local
@@ -365,6 +374,7 @@ pub fn load_all_games() -> Vec<SavedGame> {
                         result: Some(record.result),
                         game_state: None,
                         ended_at: None,
+                        vulnerability: Vulnerability::None,
                     };
                     games.push(saved);
                 }

@@ -14,7 +14,7 @@ use crate::config::{self, GameStatus, SavedGame, Settings};
 use crate::engine::bidding::Bid;
 use crate::engine::card::{Card, Rank};
 use crate::engine::game::Game;
-use crate::types::{Phase, Seat};
+use crate::types::{Phase, Seat, Vulnerability};
 use crate::ui::bid_selector::{bid_at_index, render_bid_selector, BID_GRID_SIZE};
 use crate::ui::board::render_board;
 use crate::ui::controls::render_controls;
@@ -55,6 +55,8 @@ pub struct App {
     pub tutor_controller: Option<TutorController>,
     /// Review mode state (Some when reviewing a completed game).
     pub review_state: Option<ReviewState>,
+    /// Chicago-style deal number (0-indexed, increments each new game).
+    pub deal_number: u32,
 }
 
 fn format_timestamp() -> String {
@@ -170,7 +172,7 @@ impl App {
         };
         Self {
             state: AppState {
-                game: Game::new(Seat::random()),
+                game: Game::new(Seat::random(), Vulnerability::None),
                 selected_card_index: Some(0),
                 selected_bid_index: 35,
                 status_message: None,
@@ -194,6 +196,7 @@ impl App {
             current_save_id: None,
             tutor_controller,
             review_state: None,
+            deal_number: 0,
         }
     }
 
@@ -202,7 +205,10 @@ impl App {
         if let Some(ref id) = self.current_save_id {
             let _ = config::delete_game(id);
         }
-        self.state.game = Game::new(Seat::random());
+        let dealer = Seat::random();
+        let vulnerability = Vulnerability::chicago(self.deal_number, dealer);
+        self.state.game = Game::new(dealer, vulnerability);
+        self.deal_number += 1;
         self.state.selected_card_index = Some(0);
         self.state.selected_bid_index = 35;
         self.state.status_message = None;
@@ -330,6 +336,7 @@ impl App {
             result: Some(result),
             game_state: None,
             ended_at: self.state.game_ended_at.clone(),
+            vulnerability: game.vulnerability,
         };
 
         if let Err(e) = saved.save() {
@@ -389,6 +396,7 @@ impl App {
             result: None,
             game_state,
             ended_at: None,
+            vulnerability: game.vulnerability,
         };
 
         if let Err(e) = saved.save() {

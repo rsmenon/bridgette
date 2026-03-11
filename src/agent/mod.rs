@@ -55,7 +55,7 @@ impl AgentBackend for ClaudeApiBackend {
     fn query(&self, system_prompt: &str, user_prompt: &str) -> Result<String, String> {
         let body = serde_json::json!({
             "model": self.model,
-            "max_tokens": 64,
+            "max_tokens": 512,
             "system": system_prompt,
             "messages": [
                 {"role": "user", "content": user_prompt}

@@ -2,7 +2,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 
 use crate::engine::game::Game;
-use crate::types::{Phase, Seat};
+use crate::types::{Phase, Seat, Vulnerability};
 
 use super::prompt::{hand_ascii, bid_ascii, card_ascii, SAYC_REFERENCE};
 
@@ -231,21 +231,24 @@ impl TutorController {
         }
         self.pending = true;
 
-        let system = "You are an expert bridge tutor reviewing a completed game.\n\
-            You follow Standard American Yellow Card (SAYC) conventions.\n\n\
+        let system = format!(
+            "You are an expert bridge tutor reviewing a completed game.\n\
+            You MUST strictly follow Standard American Yellow Card (SAYC) conventions.\n\n\
+            {SAYC_REFERENCE}\n\n\
             Guidelines:\n\
             - Be VERY concise. 2-3 sentences max.\n\
             - Analyze from the perspective of the player whose action is being reviewed.\n\
             - Only use information that would be visible to that player at that moment.\n\
             - Format cards as rank+suit ASCII: AS, KH, TD, 4C.\n\
             - Do not use markdown formatting. Use plain text only."
-            .to_string();
+        );
 
         let view = game.agent_view(seat);
         let mut lines = Vec::new();
 
         lines.push(format!("Reviewing from {}'s perspective.", seat));
         lines.push(format!("Dealer: {}", view.dealer));
+        lines.push(format!("Vulnerability: {}", vul_display(game.vulnerability, seat)));
         lines.push(String::new());
         lines.push(format!("{}'s hand:", seat));
         lines.push(hand_ascii(&view.hand));
@@ -345,14 +348,14 @@ fn build_tutor_system_prompt(north_declares: bool) -> String {
     };
     format!(
         "{role}\n\
-         You follow Standard American Yellow Card (SAYC) conventions.\n\
+         You MUST strictly follow Standard American Yellow Card (SAYC) conventions.\n\
          \n\
          {SAYC_REFERENCE}\n\
          \n\
          Guidelines:\n\
          - Be VERY concise. 2-3 sentences max for recommendations. Keep explanations short.\n\
          - Format cards as rank+suit ASCII: AS, KH, TD, 4C.\n\
-         - Only use information visible to the declaring side at the current point in the game.\n\
+         - Only use information visible to the human player at the current point in the game.\n\
          - When recommending a bid or play, state the action first, then a brief reason.\n\
          - If asked about a past bid that doesn't conform to SAYC, say so honestly.\n\
          - Do not use markdown formatting. Use plain text only.\n\
@@ -374,6 +377,7 @@ fn build_tutor_user_prompt(game: &Game, question: Option<String>) -> String {
     let mut lines = Vec::new();
 
     lines.push(format!("Dealer: {}", view.dealer));
+    lines.push(format!("Vulnerability: {}", vul_display(game.vulnerability, Seat::South)));
 
     if north_declares && game.phase == Phase::Playing {
         // Show both hands with clear labels
@@ -514,4 +518,15 @@ fn build_tutor_user_prompt(game: &Game, question: Option<String>) -> String {
     }
 
     lines.join("\n")
+}
+
+fn vul_display(vul: Vulnerability, seat: Seat) -> String {
+    match vul {
+        Vulnerability::None => "None vulnerable".to_string(),
+        Vulnerability::Both => "Both vulnerable".to_string(),
+        _ => {
+            let who = if vul.is_vulnerable(seat) { "You are" } else { "Opponents are" };
+            format!("{} vulnerable ({})", who, vul)
+        }
+    }
 }

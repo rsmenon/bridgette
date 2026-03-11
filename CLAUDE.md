@@ -6,7 +6,7 @@ A terminal-based contract bridge game in Rust where a human plays South against 
 
 ```bash
 cargo build                  # Build
-cargo test                   # Run tests (96 passing)
+cargo test                   # Run tests (116 passing)
 cargo run                    # Run (backend auto-detected from settings.yaml)
 ```
 
@@ -138,14 +138,16 @@ Step-through review of completed games from the Library. Selecting a completed g
 - Library UI supports filtering (in-progress/completed), favorites, resume, delete
 
 ## Scoring Rules
-All scoring is **not vulnerable** (no vulnerability tracking). Chicago-style independent deals.
+Chicago-style deals with vulnerability tracked per deal.
 - Contract points: minors 20/trick, majors 30/trick, NT 40 first + 30 subsequent
 - Doubled/redoubled multiply contract points 2×/4×
-- Game bonus: 300 if contract points ≥ 100, else 50 (part-score)
-- Slam bonus: 500 (small), 1000 (grand)
+- Game bonus: NV 300 / V 500 if contract points ≥ 100, else 50 (part-score)
+- Slam bonus: NV 500/1000 (small/grand), V 750/1500
 - Insult bonus: 50 (doubled made), 100 (redoubled made)
-- Overtricks: undoubled = trick value, doubled = 100 each, redoubled = 200 each
-- Undertricks: undoubled 50 each; doubled 100/200/300 progressive; redoubled 200/400/600
+- Overtricks: undoubled = trick value; doubled NV 100 / V 200 each; redoubled NV 200 / V 400 each
+- Undertricks undoubled: NV 50 / V 100 each
+- Undertricks doubled: NV 100/200/300 progressive; V 200/300/300
+- Undertricks redoubled: NV 200/400/600 progressive; V 400/600/600
 
 ## Style Conventions
 - Suit colors apply only to suit symbols, not rank characters
@@ -159,5 +161,14 @@ All scoring is **not vulnerable** (no vulnerability tracking). Chicago-style ind
 - Library status column uses default row text color; only "✓ Done" uses `ACCENT_GREEN`
 - `Hand::hcp()` is the single source of HCP calculation — do not duplicate
 
-## Not Yet Implemented
-- Vulnerability (always non-vulnerable)
+## Vulnerability (Chicago-style)
+- `Vulnerability` enum in `types.rs`: `None`, `NorthSouth`, `EastWest`, `Both`
+- `Vulnerability::chicago(deal_number, dealer)` computes per-deal vulnerability:
+  - Deal 0: None, Deal 1: Dealer's side, Deal 2: Both, Deal 3: Non-dealer's side (repeats)
+- `App.deal_number` tracks the current deal (0-indexed, increments each `new_game()`)
+- `Game.vulnerability` field stores the deal's vulnerability (serialized with `#[serde(default)]` for backward compat)
+- Scoring uses `vulnerability.is_vulnerable(declarer)` to determine penalties/bonuses
+- Vulnerable differences: game bonus 500 (vs 300), slam 750/1500 (vs 500/1000), undertricks 100 (vs 50), doubled/redoubled penalties higher
+- Stats panel shows "Vul: None/N-S/E-W/Both" with red accent when anyone is vulnerable
+- Agent prompts include vulnerability status in both bidding and play phases
+- `SavedGame.vulnerability` persists vulnerability; old saves default to `None`

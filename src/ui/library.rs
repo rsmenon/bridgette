@@ -6,6 +6,7 @@ use ratatui::symbols::border;
 use ratatui::Frame;
 
 use crate::config::{GameStatus, SavedGame};
+use crate::types::Vulnerability;
 
 use super::palette::*;
 
@@ -111,7 +112,7 @@ pub fn render_library(f: &mut Frame, area: Rect, state: &LibraryState) {
     // Table
     let filtered = state.filtered_games();
 
-    let header = Row::new(vec!["★", "Status", "Date", "Dealer", "Declarer", "Contract", "Score"])
+    let header = Row::new(vec!["★", "Status", "Date", "Dealer", "Vul", "Declarer", "Contract", "Score"])
         .style(
             Style::default()
                 .fg(ACCENT_MUTED_BLUE)
@@ -153,8 +154,20 @@ pub fn render_library(f: &mut Frame, area: Rect, state: &LibraryState) {
                 TEXT_DARK_MUTED
             };
 
+            let vul_str = match game.vulnerability {
+                Vulnerability::None => "—",
+                Vulnerability::NorthSouth => "N/S",
+                Vulnerability::EastWest => "E/W",
+                Vulnerability::Both => "Both",
+            };
+
             if is_selected {
                 let base = Style::default().fg(TEXT_LIGHT).bg(BG_SELECTED_BLUE).add_modifier(Modifier::BOLD);
+                let vul_style = if game.vulnerability == Vulnerability::None {
+                    base
+                } else {
+                    Style::default().fg(ACCENT_RED).bg(BG_SELECTED_BLUE).add_modifier(Modifier::BOLD)
+                };
                 Row::new(vec![
                     Cell::from(fav.to_string()).style(fav_style),
                     Cell::from(status_text.to_string()).style(match status_color {
@@ -163,6 +176,7 @@ pub fn render_library(f: &mut Frame, area: Rect, state: &LibraryState) {
                     }),
                     Cell::from(game.timestamp_display()).style(base),
                     Cell::from(game.dealer.clone()).style(base),
+                    Cell::from(vul_str).style(vul_style),
                     Cell::from(game.declarer().to_string()).style(base),
                     Cell::from(game.contract_display()).style(base),
                     Cell::from(score_str).style(base),
@@ -174,6 +188,11 @@ pub fn render_library(f: &mut Frame, area: Rect, state: &LibraryState) {
                     (BG_FRAME_ALT, TEXT_LIGHT)
                 };
                 let base = Style::default().fg(fg).bg(bg);
+                let vul_style = if game.vulnerability == Vulnerability::None {
+                    Style::default().fg(TEXT_LIGHT_MUTED).bg(bg)
+                } else {
+                    Style::default().fg(ACCENT_RED).bg(bg)
+                };
                 Row::new(vec![
                     Cell::from(fav.to_string()).style(fav_style.bg(bg)),
                     Cell::from(status_text.to_string()).style(match status_color {
@@ -182,6 +201,7 @@ pub fn render_library(f: &mut Frame, area: Rect, state: &LibraryState) {
                     }),
                     Cell::from(game.timestamp_display()).style(base),
                     Cell::from(game.dealer.clone()).style(base),
+                    Cell::from(vul_str).style(vul_style),
                     Cell::from(game.declarer().to_string()).style(base),
                     Cell::from(game.contract_display()).style(base),
                     Cell::from(score_str).style(Style::default().fg(score_color).bg(bg)),
@@ -195,6 +215,7 @@ pub fn render_library(f: &mut Frame, area: Rect, state: &LibraryState) {
         Constraint::Length(12), // Status
         Constraint::Length(18), // Date
         Constraint::Length(8),  // Dealer
+        Constraint::Length(5),  // Vul
         Constraint::Length(10), // Declarer
         Constraint::Length(10), // Contract
         Constraint::Length(8),  // Score

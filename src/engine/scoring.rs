@@ -31,15 +31,15 @@ impl Score {
     }
 }
 
-pub fn calculate_score(contract: &Contract, tricks_won: u8) -> Score {
+pub fn calculate_score(contract: &Contract, tricks_won: u8, vulnerable: bool) -> Score {
     let needed = contract.level + 6;
 
     if tricks_won >= needed {
         let overtricks = tricks_won - needed;
-        score_made(contract, overtricks)
+        score_made(contract, overtricks, vulnerable)
     } else {
         let undertricks = needed - tricks_won;
-        score_defeated(contract, undertricks)
+        score_defeated(contract, undertricks, vulnerable)
     }
 }
 
@@ -51,7 +51,7 @@ fn trick_value(suit: BidSuit) -> i32 {
     }
 }
 
-fn score_made(contract: &Contract, overtricks: u8) -> Score {
+fn score_made(contract: &Contract, overtricks: u8, vulnerable: bool) -> Score {
     // Contract points
     let base_per_trick = trick_value(contract.suit);
     let mut contract_points = base_per_trick * contract.level as i32;
@@ -65,13 +65,17 @@ fn score_made(contract: &Contract, overtricks: u8) -> Score {
         contract_points *= 2;
     }
 
-    // Game bonus: 300 if contract points >= 100, else 50
-    let game_bonus = if contract_points >= 100 { 300 } else { 50 };
+    // Game bonus: vulnerable 500/50, non-vulnerable 300/50
+    let game_bonus = if contract_points >= 100 {
+        if vulnerable { 500 } else { 300 }
+    } else {
+        50
+    };
 
-    // Slam bonus
+    // Slam bonus: vulnerable 750/1500, non-vulnerable 500/1000
     let slam_bonus = match contract.level {
-        6 => 500,
-        7 => 1000,
+        6 => if vulnerable { 750 } else { 500 },
+        7 => if vulnerable { 1500 } else { 1000 },
         _ => 0,
     };
 
@@ -86,9 +90,9 @@ fn score_made(contract: &Contract, overtricks: u8) -> Score {
 
     // Overtrick points
     let overtrick_points = if contract.redoubled {
-        overtricks as i32 * 200
+        overtricks as i32 * if vulnerable { 400 } else { 200 }
     } else if contract.doubled {
-        overtricks as i32 * 100
+        overtricks as i32 * if vulnerable { 200 } else { 100 }
     } else {
         overtricks as i32 * base_per_trick
     };
@@ -105,14 +109,13 @@ fn score_made(contract: &Contract, overtricks: u8) -> Score {
     }
 }
 
-fn score_defeated(contract: &Contract, undertricks: u8) -> Score {
-    // Not vulnerable undertrick penalties
+fn score_defeated(contract: &Contract, undertricks: u8, vulnerable: bool) -> Score {
     let penalty = if contract.redoubled {
-        redoubled_undertricks(undertricks)
+        redoubled_undertricks(undertricks, vulnerable)
     } else if contract.doubled {
-        doubled_undertricks(undertricks)
+        doubled_undertricks(undertricks, vulnerable)
     } else {
-        undertricks as i32 * 50
+        undertricks as i32 * if vulnerable { 100 } else { 50 }
     };
 
     Score::Defeated {
@@ -121,30 +124,54 @@ fn score_defeated(contract: &Contract, undertricks: u8) -> Score {
     }
 }
 
-fn doubled_undertricks(n: u8) -> i32 {
-    // Not vulnerable, doubled: 1st=100, 2nd-3rd=200 each, 4th+=300 each
-    let mut total = 0;
-    for i in 1..=n {
-        total += match i {
-            1 => 100,
-            2 | 3 => 200,
-            _ => 300,
-        };
+fn doubled_undertricks(n: u8, vulnerable: bool) -> i32 {
+    if vulnerable {
+        // Vulnerable, doubled: 1st=200, 2nd-3rd=300 each, 4th+=300 each
+        let mut total = 0;
+        for i in 1..=n {
+            total += match i {
+                1 => 200,
+                _ => 300,
+            };
+        }
+        total
+    } else {
+        // Not vulnerable, doubled: 1st=100, 2nd-3rd=200 each, 4th+=300 each
+        let mut total = 0;
+        for i in 1..=n {
+            total += match i {
+                1 => 100,
+                2 | 3 => 200,
+                _ => 300,
+            };
+        }
+        total
     }
-    total
 }
 
-fn redoubled_undertricks(n: u8) -> i32 {
-    // Not vulnerable, redoubled: 1st=200, 2nd-3rd=400 each, 4th+=600 each
-    let mut total = 0;
-    for i in 1..=n {
-        total += match i {
-            1 => 200,
-            2 | 3 => 400,
-            _ => 600,
-        };
+fn redoubled_undertricks(n: u8, vulnerable: bool) -> i32 {
+    if vulnerable {
+        // Vulnerable, redoubled: 1st=400, 2nd-3rd=600 each, 4th+=600 each
+        let mut total = 0;
+        for i in 1..=n {
+            total += match i {
+                1 => 400,
+                _ => 600,
+            };
+        }
+        total
+    } else {
+        // Not vulnerable, redoubled: 1st=200, 2nd-3rd=400 each, 4th+=600 each
+        let mut total = 0;
+        for i in 1..=n {
+            total += match i {
+                1 => 200,
+                2 | 3 => 400,
+                _ => 600,
+            };
+        }
+        total
     }
-    total
 }
 
 #[cfg(test)]
@@ -167,7 +194,7 @@ mod tests {
     #[test]
     fn test_1nt_made_exact() {
         let c = make_contract(1, BidSuit::NoTrump, false, false);
-        let score = calculate_score(&c, 7);
+        let score = calculate_score(&c,7, false);
         assert_eq!(
             score,
             Score::Made {
@@ -184,7 +211,7 @@ mod tests {
     #[test]
     fn test_2h_made_exact() {
         let c = make_contract(2, BidSuit::Hearts, false, false);
-        let score = calculate_score(&c, 8);
+        let score = calculate_score(&c,8, false);
         assert_eq!(
             score,
             Score::Made {
@@ -201,7 +228,7 @@ mod tests {
     #[test]
     fn test_1c_made_with_overtrick() {
         let c = make_contract(1, BidSuit::Clubs, false, false);
-        let score = calculate_score(&c, 9); // 2 overtricks
+        let score = calculate_score(&c,9, false); // 2 overtricks
         assert_eq!(
             score,
             Score::Made {
@@ -219,7 +246,7 @@ mod tests {
     #[test]
     fn test_3nt_made_exact() {
         let c = make_contract(3, BidSuit::NoTrump, false, false);
-        let score = calculate_score(&c, 9);
+        let score = calculate_score(&c,9, false);
         assert_eq!(
             score,
             Score::Made {
@@ -236,7 +263,7 @@ mod tests {
     #[test]
     fn test_4h_made_exact() {
         let c = make_contract(4, BidSuit::Hearts, false, false);
-        let score = calculate_score(&c, 10);
+        let score = calculate_score(&c,10, false);
         assert_eq!(
             score,
             Score::Made {
@@ -253,7 +280,7 @@ mod tests {
     #[test]
     fn test_4s_made_with_overtrick() {
         let c = make_contract(4, BidSuit::Spades, false, false);
-        let score = calculate_score(&c, 11); // 1 overtrick
+        let score = calculate_score(&c,11, false); // 1 overtrick
         assert_eq!(
             score,
             Score::Made {
@@ -270,7 +297,7 @@ mod tests {
     #[test]
     fn test_5c_made_exact() {
         let c = make_contract(5, BidSuit::Clubs, false, false);
-        let score = calculate_score(&c, 11);
+        let score = calculate_score(&c,11, false);
         assert_eq!(
             score,
             Score::Made {
@@ -287,7 +314,7 @@ mod tests {
     #[test]
     fn test_5d_made_exact() {
         let c = make_contract(5, BidSuit::Diamonds, false, false);
-        let score = calculate_score(&c, 11);
+        let score = calculate_score(&c,11, false);
         assert_eq!(
             score,
             Score::Made {
@@ -305,7 +332,7 @@ mod tests {
     #[test]
     fn test_6h_small_slam() {
         let c = make_contract(6, BidSuit::Hearts, false, false);
-        let score = calculate_score(&c, 12);
+        let score = calculate_score(&c,12, false);
         assert_eq!(
             score,
             Score::Made {
@@ -322,7 +349,7 @@ mod tests {
     #[test]
     fn test_7nt_grand_slam() {
         let c = make_contract(7, BidSuit::NoTrump, false, false);
-        let score = calculate_score(&c, 13);
+        let score = calculate_score(&c,13, false);
         assert_eq!(
             score,
             Score::Made {
@@ -341,7 +368,7 @@ mod tests {
     fn test_2s_doubled_made_exact() {
         // 2S doubled: contract pts = 60*2=120 (game!), game bonus 300, insult 50
         let c = make_contract(2, BidSuit::Spades, true, false);
-        let score = calculate_score(&c, 8);
+        let score = calculate_score(&c,8, false);
         assert_eq!(
             score,
             Score::Made {
@@ -359,7 +386,7 @@ mod tests {
     fn test_3h_doubled_with_overtrick() {
         // 3H doubled: contract pts = 90*2=180, game bonus 300, insult 50, overtrick 100
         let c = make_contract(3, BidSuit::Hearts, true, false);
-        let score = calculate_score(&c, 10); // 1 overtrick
+        let score = calculate_score(&c,10, false); // 1 overtrick
         assert_eq!(
             score,
             Score::Made {
@@ -378,7 +405,7 @@ mod tests {
     fn test_1nt_redoubled_made() {
         // 1NT redoubled: contract pts = 40*4=160 (game!), game bonus 300, insult 100
         let c = make_contract(1, BidSuit::NoTrump, false, true);
-        let score = calculate_score(&c, 7);
+        let score = calculate_score(&c,7, false);
         assert_eq!(
             score,
             Score::Made {
@@ -396,7 +423,7 @@ mod tests {
     fn test_1c_redoubled_with_overtricks() {
         // 1C redoubled: contract pts = 20*4=80, part-score 50, insult 100, overtricks 200 each
         let c = make_contract(1, BidSuit::Clubs, false, true);
-        let score = calculate_score(&c, 9); // 2 overtricks
+        let score = calculate_score(&c,9, false); // 2 overtricks
         assert_eq!(
             score,
             Score::Made {
@@ -414,7 +441,7 @@ mod tests {
     #[test]
     fn test_down_1_undoubled() {
         let c = make_contract(4, BidSuit::Spades, false, false);
-        let score = calculate_score(&c, 9); // down 1
+        let score = calculate_score(&c,9, false); // down 1
         assert_eq!(
             score,
             Score::Defeated {
@@ -427,7 +454,7 @@ mod tests {
     #[test]
     fn test_down_3_undoubled() {
         let c = make_contract(4, BidSuit::Spades, false, false);
-        let score = calculate_score(&c, 7); // down 3
+        let score = calculate_score(&c,7, false); // down 3
         assert_eq!(
             score,
             Score::Defeated {
@@ -441,7 +468,7 @@ mod tests {
     #[test]
     fn test_down_1_doubled() {
         let c = make_contract(4, BidSuit::Spades, true, false);
-        let score = calculate_score(&c, 9); // down 1
+        let score = calculate_score(&c,9, false); // down 1
         assert_eq!(
             score,
             Score::Defeated {
@@ -454,7 +481,7 @@ mod tests {
     #[test]
     fn test_down_2_doubled() {
         let c = make_contract(4, BidSuit::Spades, true, false);
-        let score = calculate_score(&c, 8); // down 2
+        let score = calculate_score(&c,8, false); // down 2
         assert_eq!(
             score,
             Score::Defeated {
@@ -467,7 +494,7 @@ mod tests {
     #[test]
     fn test_down_3_doubled() {
         let c = make_contract(3, BidSuit::NoTrump, true, false);
-        let score = calculate_score(&c, 6); // down 3
+        let score = calculate_score(&c,6, false); // down 3
         assert_eq!(
             score,
             Score::Defeated {
@@ -480,7 +507,7 @@ mod tests {
     #[test]
     fn test_down_4_doubled() {
         let c = make_contract(4, BidSuit::Spades, true, false);
-        let score = calculate_score(&c, 6); // down 4
+        let score = calculate_score(&c,6, false); // down 4
         assert_eq!(
             score,
             Score::Defeated {
@@ -493,7 +520,7 @@ mod tests {
     #[test]
     fn test_down_5_doubled() {
         let c = make_contract(4, BidSuit::Hearts, true, false);
-        let score = calculate_score(&c, 5); // down 5
+        let score = calculate_score(&c,5, false); // down 5
         assert_eq!(
             score,
             Score::Defeated {
@@ -507,7 +534,7 @@ mod tests {
     #[test]
     fn test_down_1_redoubled() {
         let c = make_contract(4, BidSuit::Spades, false, true);
-        let score = calculate_score(&c, 9); // down 1
+        let score = calculate_score(&c,9, false); // down 1
         assert_eq!(
             score,
             Score::Defeated {
@@ -520,7 +547,7 @@ mod tests {
     #[test]
     fn test_down_3_redoubled() {
         let c = make_contract(3, BidSuit::NoTrump, false, true);
-        let score = calculate_score(&c, 6); // down 3
+        let score = calculate_score(&c,6, false); // down 3
         assert_eq!(
             score,
             Score::Defeated {
@@ -533,7 +560,7 @@ mod tests {
     #[test]
     fn test_down_4_redoubled() {
         let c = make_contract(4, BidSuit::Spades, false, true);
-        let score = calculate_score(&c, 6); // down 4
+        let score = calculate_score(&c,6, false); // down 4
         assert_eq!(
             score,
             Score::Defeated {
@@ -548,7 +575,7 @@ mod tests {
     fn test_2nt_made_exact() {
         // 2NT: 40+30 = 70, part-score
         let c = make_contract(2, BidSuit::NoTrump, false, false);
-        let score = calculate_score(&c, 8);
+        let score = calculate_score(&c,8, false);
         assert_eq!(
             score,
             Score::Made {
@@ -565,7 +592,7 @@ mod tests {
     #[test]
     fn test_6s_small_slam_with_overtrick() {
         let c = make_contract(6, BidSuit::Spades, false, false);
-        let score = calculate_score(&c, 13); // grand slam in tricks but bid small slam
+        let score = calculate_score(&c,13, false); // grand slam in tricks but bid small slam
         assert_eq!(
             score,
             Score::Made {
@@ -598,5 +625,239 @@ mod tests {
         assert_eq!(defeated.total_points(), -300);
 
         assert_eq!(Score::PassedOut.total_points(), 0);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // VULNERABLE SCORING TESTS
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn test_vul_3nt_made_exact() {
+        // Game bonus 500 when vulnerable (vs 300 non-vul)
+        let c = make_contract(3, BidSuit::NoTrump, false, false);
+        let score = calculate_score(&c, 9, true);
+        assert_eq!(
+            score,
+            Score::Made {
+                contract_points: 100,
+                overtrick_points: 0,
+                game_bonus: 500,
+                slam_bonus: 0,
+                insult_bonus: 0,
+                total: 600,
+            }
+        );
+    }
+
+    #[test]
+    fn test_vul_4h_made_exact() {
+        let c = make_contract(4, BidSuit::Hearts, false, false);
+        let score = calculate_score(&c, 10, true);
+        assert_eq!(
+            score,
+            Score::Made {
+                contract_points: 120,
+                overtrick_points: 0,
+                game_bonus: 500,
+                slam_bonus: 0,
+                insult_bonus: 0,
+                total: 620,
+            }
+        );
+    }
+
+    #[test]
+    fn test_vul_partscore_bonus_unchanged() {
+        // Part-score bonus is still 50 when vulnerable
+        let c = make_contract(2, BidSuit::Hearts, false, false);
+        let score = calculate_score(&c, 8, true);
+        assert_eq!(
+            score,
+            Score::Made {
+                contract_points: 60,
+                overtrick_points: 0,
+                game_bonus: 50,
+                slam_bonus: 0,
+                insult_bonus: 0,
+                total: 110,
+            }
+        );
+    }
+
+    #[test]
+    fn test_vul_6h_small_slam() {
+        // Vulnerable slam: 750 (vs 500 non-vul), game bonus 500
+        let c = make_contract(6, BidSuit::Hearts, false, false);
+        let score = calculate_score(&c, 12, true);
+        assert_eq!(
+            score,
+            Score::Made {
+                contract_points: 180,
+                overtrick_points: 0,
+                game_bonus: 500,
+                slam_bonus: 750,
+                insult_bonus: 0,
+                total: 1430,
+            }
+        );
+    }
+
+    #[test]
+    fn test_vul_7nt_grand_slam() {
+        // Vulnerable grand slam: 1500 (vs 1000 non-vul), game bonus 500
+        let c = make_contract(7, BidSuit::NoTrump, false, false);
+        let score = calculate_score(&c, 13, true);
+        assert_eq!(
+            score,
+            Score::Made {
+                contract_points: 220,
+                overtrick_points: 0,
+                game_bonus: 500,
+                slam_bonus: 1500,
+                insult_bonus: 0,
+                total: 2220,
+            }
+        );
+    }
+
+    #[test]
+    fn test_vul_doubled_overtrick() {
+        // Doubled overtrick: 200 each when vulnerable (vs 100 non-vul)
+        let c = make_contract(3, BidSuit::Hearts, true, false);
+        let score = calculate_score(&c, 10, true); // 1 overtrick
+        assert_eq!(
+            score,
+            Score::Made {
+                contract_points: 180,
+                overtrick_points: 200,
+                game_bonus: 500,
+                slam_bonus: 0,
+                insult_bonus: 50,
+                total: 930,
+            }
+        );
+    }
+
+    #[test]
+    fn test_vul_redoubled_overtrick() {
+        // Redoubled overtrick: 400 each when vulnerable (vs 200 non-vul)
+        let c = make_contract(1, BidSuit::Clubs, false, true);
+        let score = calculate_score(&c, 9, true); // 2 overtricks
+        assert_eq!(
+            score,
+            Score::Made {
+                contract_points: 80,
+                overtrick_points: 800,
+                game_bonus: 50,
+                slam_bonus: 0,
+                insult_bonus: 100,
+                total: 1030,
+            }
+        );
+    }
+
+    // Vulnerable undertricks
+    #[test]
+    fn test_vul_down_1_undoubled() {
+        let c = make_contract(4, BidSuit::Spades, false, false);
+        let score = calculate_score(&c, 9, true); // down 1
+        assert_eq!(
+            score,
+            Score::Defeated {
+                undertricks: 1,
+                penalty: -100,
+            }
+        );
+    }
+
+    #[test]
+    fn test_vul_down_3_undoubled() {
+        let c = make_contract(4, BidSuit::Spades, false, false);
+        let score = calculate_score(&c, 7, true); // down 3
+        assert_eq!(
+            score,
+            Score::Defeated {
+                undertricks: 3,
+                penalty: -300,
+            }
+        );
+    }
+
+    #[test]
+    fn test_vul_down_1_doubled() {
+        let c = make_contract(4, BidSuit::Spades, true, false);
+        let score = calculate_score(&c, 9, true); // down 1
+        assert_eq!(
+            score,
+            Score::Defeated {
+                undertricks: 1,
+                penalty: -200,
+            }
+        );
+    }
+
+    #[test]
+    fn test_vul_down_2_doubled() {
+        let c = make_contract(4, BidSuit::Spades, true, false);
+        let score = calculate_score(&c, 8, true); // down 2
+        assert_eq!(
+            score,
+            Score::Defeated {
+                undertricks: 2,
+                penalty: -500,
+            }
+        );
+    }
+
+    #[test]
+    fn test_vul_down_3_doubled() {
+        let c = make_contract(3, BidSuit::NoTrump, true, false);
+        let score = calculate_score(&c, 6, true); // down 3
+        assert_eq!(
+            score,
+            Score::Defeated {
+                undertricks: 3,
+                penalty: -800,
+            }
+        );
+    }
+
+    #[test]
+    fn test_vul_down_4_doubled() {
+        let c = make_contract(4, BidSuit::Spades, true, false);
+        let score = calculate_score(&c, 6, true); // down 4
+        assert_eq!(
+            score,
+            Score::Defeated {
+                undertricks: 4,
+                penalty: -1100,
+            }
+        );
+    }
+
+    #[test]
+    fn test_vul_down_1_redoubled() {
+        let c = make_contract(4, BidSuit::Spades, false, true);
+        let score = calculate_score(&c, 9, true); // down 1
+        assert_eq!(
+            score,
+            Score::Defeated {
+                undertricks: 1,
+                penalty: -400,
+            }
+        );
+    }
+
+    #[test]
+    fn test_vul_down_3_redoubled() {
+        let c = make_contract(3, BidSuit::NoTrump, false, true);
+        let score = calculate_score(&c, 6, true); // down 3
+        assert_eq!(
+            score,
+            Score::Defeated {
+                undertricks: 3,
+                penalty: -1600,
+            }
+        );
     }
 }

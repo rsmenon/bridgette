@@ -1,10 +1,8 @@
 # ♠️♥️ Bridgette ♦️♣️
 
-A terminal-based contract bridge game where you play South with an AI partner at North and two AI opponents at East/West.
+A terminal-based contract bridge game where you play as South with an AI partner at North and two AI opponents at East/West.
 
-All three AI players bid and play using Standard American Yellow Card (SAYC) conventions. An in-game tutor watches over your shoulder and explains what's happening.
-
-<img width="1460" height="914" alt="Screenshot 2026-03-06 at 00 12 09" src="https://github.com/user-attachments/assets/c3ab12b1-4967-4f13-b937-6959e83dd110" />
+All three AI players bid and play using Standard American Yellow Card (SAYC) conventions. Access an in-game tutor during the game for guidance on your next bid/play.
 
 ## Features
 
@@ -15,10 +13,19 @@ All three AI players bid and play using Standard American Yellow Card (SAYC) con
 - **Post-game review**: Step through completed games bid-by-bid and card-by-card, with the tutor available to explain each decision
 - **Customizable partner**: Give North custom instructions in `settings.yaml` to change your partner's bidding style or personality
 
+Gameplay & Live Tutor    |  Library & Post-game Review
+:-----------------------|:-------------------------
+![](https://github.com/user-attachments/assets/c3ab12b1-4967-4f13-b937-6959e83dd110)  |  ![](https://github.com/user-attachments/assets/780bfab5-ed68-48ad-8e4d-d72ba4769ca7)
+
+> [!NOTE]
+> This app was a personal project to 1) help me get back into competitive Bridge after more than two decades, and 2) build something sufficiently complex with [Ratatui](http://ratatui.rs) than simple CLI apps. 
+>
+> I will continue tinkering with this in my spare time as long as it still meets those two objectives, but I do not intend to turn this into an app for a general audience or support offline play. This is not a bridge game engine or a hand solver either (see other projects like [Ben](https://github.com/lorserker/ben) or [DDS](https://privat.bahnhof.se/wb758135/bridge/index.html) for that.) 
+
 
 ## Setup
 
-You need a Claude API key or the `claude` CLI installed.
+You need either the `claude` CLI installed or an API key. 
 
 ```bash
 cargo build --release
@@ -74,9 +81,3 @@ The game engine is a standalone state machine that handles dealing, auction vali
 Prompts are structured with a system message containing the full SAYC reference, plus a turn-specific message with the hand, auction history, valid moves, and situational reminders. The engine keeps the AI honest — it can only make legal bids and play eligible cards.
 
 Games are saved as JSON in `~/.config/bridgette/data/`. The review system reconstructs game state at any point by replaying the recorded bids and cards through the engine.
-
-## Limitations
-
-- No vulnerability tracking (always scores as not vulnerable)
-- Requires a Claude backend (no offline play)
-
