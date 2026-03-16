@@ -359,7 +359,8 @@ fn build_tutor_system_prompt(north_declares: bool) -> String {
          - When recommending a bid or play, state the action first, then a brief reason.\n\
          - If asked about a past bid that doesn't conform to SAYC, say so honestly.\n\
          - Do not use markdown formatting. Use plain text only.\n\
-         - Do not repeat or restate the hand or game state. The player can already see it."
+         - Do not repeat or restate the hand or game state. The player can already see it.\n\
+         - Output your final answer only. Do not include any self-corrections, reasoning, or meta-commentary like 'Correction to previous response'."
     )
 }
 

@@ -41,11 +41,6 @@ pub struct SeatAgent {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NorthAgent {
     pub model: String,
-    /// Custom system instructions for North (your partner). When set, these
-    /// replace the default SAYC system prompt, letting you fine-tune your
-    /// partner's playing style.
-    #[serde(default)]
-    pub custom_instructions: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -71,7 +66,6 @@ impl Default for Settings {
             agents: AgentSeats {
                 north: NorthAgent {
                     model: "claude-opus-4-6".to_string(),
-                    custom_instructions: String::new(),
                 },
                 east: SeatAgent {
                     model: "claude-opus-4-6".to_string(),

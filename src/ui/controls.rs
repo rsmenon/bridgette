@@ -6,6 +6,7 @@ use ratatui::Frame;
 
 use crate::types::{Phase, Seat};
 
+
 use super::palette::*;
 use super::AppState;
 
@@ -26,8 +27,8 @@ pub fn render_controls(f: &mut Frame, area: Rect, state: &AppState) {
 
     if let Some((ref msg, _)) = state.status_message {
         let para = Paragraph::new(Line::from(vec![
-            Span::styled(" ● ", Style::default().fg(ACCENT_TEAL)),
-            Span::styled(msg.as_str(), Style::default().fg(ACCENT_TEAL)),
+            Span::styled(" ● ", Style::default().fg(ACCENT_MUTED_BLUE)),
+            Span::styled(msg.as_str(), Style::default().fg(ACCENT_MUTED_BLUE)),
         ]))
         .style(Style::default().bg(BG_CONTROLS));
         f.render_widget(para, rows[1]);
@@ -39,7 +40,6 @@ pub fn render_controls(f: &mut Frame, area: Rect, state: &AppState) {
         );
     }
 
-    let tutor_active = state.tutor.is_some();
     let current = state.game.current_seat();
     let human_turn = match state.game.phase {
         Phase::Bidding => current == Seat::South,
@@ -52,79 +52,59 @@ pub fn render_controls(f: &mut Frame, area: Rect, state: &AppState) {
         Phase::Finished => false,
     };
 
-    let controls: Vec<(&str, &str)> = match state.game.phase {
-        Phase::Bidding if human_turn => {
-            let mut v: Vec<(&str, &str)> = vec![
-                ("↑↓←→", "Navigate"),
-                ("Enter", "Bid"),
-                ("P", "Pass"),
-                ("D", "Dbl"),
-                ("R", "Rdbl"),
-                ("1-7", "Level"),
-            ];
-            if tutor_active {
-                v.push(("Tab", "Ask"));
-                v.push(("T/Esc", "Close Tutor"));
-            } else {
-                v.push(("T", "Tutor"));
-            }
-            v.extend_from_slice(&[("H", "Help"), ("Q", "Quit")]);
-            v
-        }
-        Phase::Bidding => vec![
-            ("N", "New Game"),
-            ("L", "Library"),
-            ("?", "Help"),
-            ("Q", "Quit"),
-        ],
-        Phase::Playing if human_turn => {
-            let mut v: Vec<(&str, &str)> = vec![
-                ("←→", "Select"),
-                ("↑↓", "Suit"),
-                ("Enter", "Play"),
-                ("A-9", "By Rank"),
-            ];
-            if tutor_active {
-                v.push(("Tab", "Ask"));
-                v.push(("T/Esc", "Close Tutor"));
-            } else {
-                v.push(("T", "Tutor"));
-            }
-            v.extend_from_slice(&[("H", "Help"), ("Q", "Quit")]);
-            v
-        }
-        Phase::Playing => vec![
-            ("N", "New Game"),
-            ("L", "Library"),
-            ("?", "Help"),
-            ("Q", "Quit"),
-        ],
-        Phase::Finished => vec![
-            ("N", "New Game"),
-            ("L", "Library"),
-            ("T", "Tutor"),
-            ("Q", "Quit"),
-            ("H", "Help"),
-        ],
+    // Standard shortcuts always shown, plus optional phase-specific extras after a separator.
+    let standard: &[(&str, &str)] = &[
+        ("N", "New"),
+        ("L", "Library"),
+        ("B", "Probability"),
+        ("T", "Tutor"),
+        ("?", "Help"),
+        ("Q", "Quit"),
+    ];
+
+    let bid_extras: &[(&str, &str)] = if matches!(state.game.phase, Phase::Bidding) && human_turn {
+        &[
+            ("↑↓←→", "Navigate"),
+            ("Enter", "Bid"),
+            ("P", "Pass"),
+            ("X", "Dbl"),
+            ("1-7", "Level"),
+        ]
+    } else {
+        &[]
     };
 
-    let spans: Vec<Span> = controls
-        .iter()
-        .flat_map(|(key, desc)| {
-            vec![
-                Span::styled(" [", Style::default().fg(TEXT_LIGHT_DISABLED)),
-                Span::styled(
-                    *key,
-                    Style::default()
-                        .fg(BG_FRAME)
-                        .bg(TEXT_LIGHT_MUTED)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled("] ", Style::default().fg(TEXT_LIGHT_DISABLED)),
-                Span::styled(format!("{} ", desc), Style::default().fg(TEXT_LIGHT_MUTED)),
-            ]
-        })
-        .collect();
+    fn key_spans(pairs: &[(&str, &str)]) -> Vec<Span<'static>> {
+        pairs
+            .iter()
+            .flat_map(|(key, desc)| {
+                vec![
+                    Span::styled(" [", Style::default().fg(TEXT_LIGHT_DISABLED)),
+                    Span::styled(
+                        key.to_string(),
+                        Style::default()
+                            .fg(BG_FRAME)
+                            .bg(TEXT_LIGHT_MUTED)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled("] ", Style::default().fg(TEXT_LIGHT_DISABLED)),
+                    Span::styled(
+                        format!("{} ", desc),
+                        Style::default().fg(TEXT_LIGHT_MUTED),
+                    ),
+                ]
+            })
+            .collect()
+    }
+
+    let mut spans = key_spans(&standard);
+    if !bid_extras.is_empty() {
+        spans.push(Span::styled(
+            " │ ",
+            Style::default().fg(TEXT_LIGHT_DISABLED),
+        ));
+        spans.extend(key_spans(bid_extras));
+    }
 
     let para = Paragraph::new(Line::from(spans)).style(Style::default().bg(BG_CONTROLS));
     f.render_widget(para, rows[2]);

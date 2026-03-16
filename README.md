@@ -1,35 +1,28 @@
-# ♠️♥️ Bridgette ♦️♣️
+# ♠️♥️ BRIDGETTE: Bridge Terminal Tutor Engine ♦️♣️
 
-A terminal-based contract bridge game where you play as South with an AI partner at North and two AI opponents at East/West.
+A terminal-based Contract Bridge app where you play as South with an AI partner at North and two AI opponents at East/West. All three AI players bid and play using Standard American Yellow Card (SAYC) conventions. 
 
-All three AI players bid and play using Standard American Yellow Card (SAYC) conventions. Access an in-game tutor during the game for guidance on your next bid/play.
-
-## Features
-
-- **Full contract bridge**: Bidding, play, and scoring with proper follow-suit rules, trick-taking, and contract evaluation
-- **AI opponents and partner**: Each seat runs its own Claude prompt with SAYC knowledge, including situational awareness for conventions like Stayman, Jacoby Transfers, and Blackwood
-- **In-game tutor**: Press `T` to open the tutor panel. It automatically offers advice when it's your turn — explaining what to bid or which card to play and why
-- **Game library**: Games auto-save as you play. Browse, resume, favorite, and delete from the library screen
-- **Post-game review**: Step through completed games bid-by-bid and card-by-card, with the tutor available to explain each decision
-- **Customizable partner**: Give North custom instructions in `settings.yaml` to change your partner's bidding style or personality
-
-Gameplay & Live Tutor    |  Library & Post-game Review
-:-----------------------|:-------------------------
-![](https://github.com/user-attachments/assets/c3ab12b1-4967-4f13-b937-6959e83dd110)  |  ![](https://github.com/user-attachments/assets/780bfab5-ed68-48ad-8e4d-d72ba4769ca7)
+This app is targeted at people who don't have access to a local Bridge club, but want to practice and improve their skills 
+* Play the game start to finish without any additional hints/guidance and review it play-by-play in the library with an AI tutor
+* Play the game with an in-game tutor to get guidance on the best bid/play for the current stage of the game. 
+* Activate a Monte Carlo sampling engine that predicts HCP card probabilities and distribution for hidden hands to improve your own intuition and card counting skills.
 
 > [!NOTE]
-> This app was a personal project to 1) help me get back into competitive Bridge after more than two decades, and 2) build something sufficiently complex with [Ratatui](http://ratatui.rs) than simple CLI apps. 
+> These features are meant as a learning tool to build up the underlying skills. These tools will not be available in a real game at a club/tournament, so do not over rely on it to play the game.
 >
-> I will continue tinkering with this in my spare time as long as it still meets those two objectives, but I do not intend to turn this into an app for a general audience or support offline play. This is not a bridge game engine or a hand solver either (see other projects like [Ben](https://github.com/lorserker/ben) or [DDS](https://privat.bahnhof.se/wb758135/bridge/index.html) for that.) 
-
+> This is not a bridge game engine or a hand solver -- see other projects like [Ben](https://github.com/lorserker/ben) or [DDS](https://privat.bahnhof.se/wb758135/bridge/index.html) for that. This uses Anthropic LLMs with tuned prompta for AI bidding and gameplay, so usual caveats with LLMs apply.
 
 ## Setup
 
-You need either the `claude` CLI installed or an API key. 
+You will need:
+* Rust 1.8+
+* Anthropic Claude Code -- either the `claude` CLI installed or an API key
+
+This app was built and tested only on macOS but it should work on linux with appropriate modifications to the commands below 
 
 ```bash
-cargo build --release
-./target/release/bridgette
+brew install rust
+cargo install --git https://github.com/rsmenon/bridgette.git
 ```
 
 On first run, Bridgette creates a config file at `~/.config/bridgette/settings.yaml`. Set your API key there or export it as an environment variable:
@@ -47,7 +40,6 @@ api:
 agents:
   north:
     model: claude-opus-4-6
-    custom_instructions: ""
   east:
     model: claude-opus-4-6
   west:
@@ -63,14 +55,14 @@ Backend auto-detection: if an API key is present, Bridgette uses the Anthropic A
 
 | Key | Action |
 |-----|--------|
+| <kbd>N</kbd> | New game |
+| <kbd>L</kbd> | Open game library |
+| <kbd>B</kbd> | Toggle probabilities | 
+| <kbd>T</kbd> | Toggle tutor panel |
+| <kbd>?</kbd> | Help |
+| <kbd>Q</kbd> | Quit |
 | Arrow keys | Navigate hand / bid selector |
-| Enter | Play card / place bid |
-| `T` | Toggle tutor panel |
-| `PageUp/Down` | Scroll tutor response |
-| `L` | Open game library |
-| `N` | New game |
-| `?` | Help |
-| `Q` | Quit |
+| <kbd>Enter</kbd> | Play card / place bid |
 
 When N/S is declaring, you control both hands — South as declarer or dummy, and North as the other. East/West always play themselves.
 
@@ -80,4 +72,18 @@ The game engine is a standalone state machine that handles dealing, auction vali
 
 Prompts are structured with a system message containing the full SAYC reference, plus a turn-specific message with the hand, auction history, valid moves, and situational reminders. The engine keeps the AI honest — it can only make legal bids and play eligible cards.
 
+The probability display (toggle with `B`) estimates where each hidden card likely lives. It works by reading the auction — each bid implies constraints on HCP and suit lengths per SAYC — then running thousands of random deals that satisfy those constraints and the cards already played. The fraction of deals where a given card lands with a given opponent is that card's displayed probability. For small endgame positions it switches to exact enumeration instead of sampling.
+
 Games are saved as JSON in `~/.config/bridgette/data/`. The review system reconstructs game state at any point by replaying the recorded bids and cards through the engine.
+
+## Screenshots
+
+Feature/Screen | Screenshot
+----|----
+Gameplay | <img width="600" src="https://github.com/user-attachments/assets/606fb810-3a32-48e6-af6d-a1896085cc59" />
+Live Tutor | <img width="600" src="https://github.com/user-attachments/assets/ea10ee97-4a65-4ea0-910a-ff30ffa8c78f" />
+Estimate HCP Cards & Distribution | <img width="600" src="https://github.com/user-attachments/assets/2518e27a-f6a9-4262-b540-95b5b3d18e06" />
+Library | <img width="600" src="https://github.com/user-attachments/assets/c586e920-1736-4efe-b7f2-d47ace6de7fa" />
+Post-game review | <img width="600" src="https://github.com/user-attachments/assets/50e1853f-3767-4d6c-96d2-e4e904369ae3" />
+
+

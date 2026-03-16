@@ -18,7 +18,7 @@ pub fn render_score_panel(f: &mut Frame, area: Rect, state: &AppState) {
             Span::styled(
                 "N/S: ",
                 Style::default()
-                    .fg(ACCENT_TEAL)
+                    .fg(ACCENT_MUTED_BLUE)
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
@@ -30,7 +30,7 @@ pub fn render_score_panel(f: &mut Frame, area: Rect, state: &AppState) {
             Span::styled(
                 "E/W: ",
                 Style::default()
-                    .fg(ACCENT_TEAL)
+                    .fg(ACCENT_MUTED_BLUE)
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
@@ -64,7 +64,7 @@ pub fn render_score_panel(f: &mut Frame, area: Rect, state: &AppState) {
                 let color = if result >= 0 {
                     ACCENT_GREEN
                 } else {
-                    ACCENT_RED
+                    SUIT_RED
                 };
                 lines.push(Line::from(Span::styled(
                     msg,
@@ -87,23 +87,23 @@ pub fn render_score_panel(f: &mut Frame, area: Rect, state: &AppState) {
                                     .fg(ACCENT_GREEN)
                                     .add_modifier(Modifier::BOLD),
                             )));
-                            let mut parts = vec![format!("{}ctr", contract_points)];
+                            let mut parts = vec![format!("{} contract", contract_points)];
                             if *overtrick_points > 0 {
-                                parts.push(format!("{}ot", overtrick_points));
+                                parts.push(format!("{} overtrick", overtrick_points));
                             }
-                            parts.push(format!(
-                                "{}{}",
-                                game_bonus,
-                                if *game_bonus >= 300 { "gm" } else { "ps" }
-                            ));
+                            if *game_bonus >= 300 {
+                                parts.push(format!("{} game", game_bonus));
+                            } else {
+                                parts.push(format!("{} partscore", game_bonus));
+                            }
                             if *slam_bonus > 0 {
-                                parts.push(format!("{}sl", slam_bonus));
+                                parts.push(format!("{} slam", slam_bonus));
                             }
                             if *insult_bonus > 0 {
-                                parts.push(format!("{}ins", insult_bonus));
+                                parts.push(format!("{} insult", insult_bonus));
                             }
                             lines.push(Line::from(Span::styled(
-                                parts.join("+"),
+                                parts.join(" + "),
                                 Style::default().fg(TEXT_LIGHT_MUTED),
                             )));
                         }
@@ -111,7 +111,7 @@ pub fn render_score_panel(f: &mut Frame, area: Rect, state: &AppState) {
                             lines.push(Line::from(Span::styled(
                                 format!("Penalty: {}", penalty),
                                 Style::default()
-                                    .fg(ACCENT_RED)
+                                    .fg(SUIT_RED)
                                     .add_modifier(Modifier::BOLD),
                             )));
                         }

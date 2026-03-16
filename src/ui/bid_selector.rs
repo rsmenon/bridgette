@@ -50,7 +50,7 @@ pub fn render_bid_selector(f: &mut Frame, area: Rect, state: &AppState) {
             let line = if is_selected && is_valid {
                 let style = Style::default()
                     .fg(BG_FRAME)
-                    .bg(ACCENT_TEAL)
+                    .bg(ACCENT_MUTED_BLUE)
                     .add_modifier(Modifier::BOLD);
                 Line::from(vec![
                     Span::styled(format!("{}", level), style),
@@ -96,7 +96,7 @@ pub fn render_bid_selector(f: &mut Frame, area: Rect, state: &AppState) {
         let style = if is_selected && is_valid {
             Style::default()
                 .fg(BG_FRAME)
-                .bg(ACCENT_TEAL)
+                .bg(ACCENT_MUTED_BLUE)
                 .add_modifier(Modifier::BOLD)
         } else if !is_valid {
             Style::default().fg(TEXT_LIGHT_DISABLED).add_modifier(Modifier::DIM)

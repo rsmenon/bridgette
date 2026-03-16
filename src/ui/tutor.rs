@@ -75,13 +75,13 @@ pub fn render_response_with_hint(f: &mut Frame, area: Rect, state: &TutorState, 
             Span::styled(
                 format!("{} ", symbol),
                 Style::default()
-                    .fg(ACCENT_TEAL)
+                    .fg(ACCENT_MUTED_BLUE)
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 "Thinking...",
                 Style::default()
-                    .fg(ACCENT_TEAL)
+                    .fg(ACCENT_MUTED_BLUE)
                     .add_modifier(Modifier::BOLD),
             ),
         ]);

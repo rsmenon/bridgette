@@ -33,8 +33,7 @@ fn main() -> anyhow::Result<()> {
 
     eprintln!("Agent backend: {}", backend.name());
 
-    let mut controller = AgentController::new(backend);
-    controller.set_north_custom_instructions(settings.agents.north.custom_instructions.clone());
+    let controller = AgentController::new(backend);
 
     // Build tutor controller: prefer API, fall back to CLI
     let tutor_controller = if settings.review.enabled {
@@ -99,6 +98,9 @@ fn run_app(
         if last_tick.elapsed() >= tick_rate {
             // Tick agents
             app.tick_agents();
+
+            // Tick inference
+            app.tick_inference();
 
             // Tick tutor
             app.tick_tutor();

@@ -33,12 +33,8 @@ pub const SUIT_RED: Color = Color::Rgb(185, 40, 35);
 pub const SUIT_BLACK_ON_TABLE: Color = Color::Rgb(220, 215, 200);
 pub const SUIT_RED_ON_TABLE: Color = Color::Rgb(240, 90, 75);
 // ── Accent colors ────────────────────────────────────────────────────
-pub const ACCENT_GOLD: Color = Color::Rgb(210, 170, 50);
-pub const ACCENT_TEAL: Color = Color::Rgb(100, 135, 185);
 pub const ACCENT_GREEN: Color = Color::Rgb(50, 160, 90);
 pub const ACCENT_RED: Color = Color::Rgb(210, 60, 45);
-pub const ACCENT_BLUE: Color = Color::Rgb(80, 170, 160);
-pub const ACCENT_SAGE: Color = Color::Rgb(130, 160, 120);
 pub const ACCENT_MUTED_BLUE: Color = Color::Rgb(110, 140, 180);
 
 // ── Active player content tint ───────────────────────────────────────

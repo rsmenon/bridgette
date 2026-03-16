@@ -382,13 +382,13 @@ fn render_step_indicator(f: &mut Frame, area: Rect, review: &ReviewState) {
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
             format!("{}: {}", bid_rec.seat, bid_rec.bid),
-            Style::default().fg(ACCENT_TEAL),
+            Style::default().fg(ACCENT_MUTED_BLUE),
         )));
     } else if let Some(tc) = card_at_play_index(&review.saved, review.step - num_bids) {
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
             format!("{}: {}", tc.seat, tc.card),
-            Style::default().fg(ACCENT_TEAL),
+            Style::default().fg(ACCENT_MUTED_BLUE),
         )));
     }
 

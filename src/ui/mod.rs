@@ -5,6 +5,7 @@ pub mod controls;
 pub mod dialog;
 pub mod library;
 pub mod palette;
+pub mod probability_grid;
 pub mod score_panel;
 pub mod trick_history;
 pub mod review;
@@ -13,9 +14,18 @@ pub mod tutor;
 use std::time::Instant;
 
 use crate::engine::game::Game;
+use crate::engine::inference::CardProbabilities;
 use crate::types::Seat;
 
 pub use self::tutor::TutorState;
+
+/// State for the Monte Carlo probability inference display.
+#[allow(dead_code)]
+pub struct InferenceState {
+    pub probabilities: Option<CardProbabilities>,
+    pub fingerprint: usize,
+    pub pending: bool,
+}
 
 /// Agent backend info for display in player boxes.
 pub struct AgentInfo {
@@ -50,6 +60,10 @@ pub struct AppState {
     pub agent_errors: Vec<String>,
     /// Tutor panel state (Some when tutor is active).
     pub tutor: Option<TutorState>,
+    /// Monte Carlo inference state.
+    pub inference: Option<InferenceState>,
+    /// Whether to show probability grids (toggled with M).
+    pub show_probabilities: bool,
 }
 
 impl AppState {

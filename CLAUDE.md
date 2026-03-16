@@ -15,14 +15,14 @@ Game data: `~/.config/bridgette/data/`
 
 Backend auto-detection priority: API key present → Claude API, `claude` CLI available → CLI, otherwise panics.
 
-## Architecture
+## Module Structure
 
 ```
 src/
 ├── main.rs              # Entry point, terminal setup, event loop (~30fps polling)
 ├── app.rs               # App struct: game state, agent controller, mode management (Game/Library/Review), draw/input
-├── types.rs             # Seat (N/E/S/W), Phase (Bidding/Playing/Finished)
-├── config.rs            # Settings (YAML), NorthAgent/SeatAgent, SavedGame/GameRecord (JSON), file I/O
+├── types.rs             # Seat (N/E/S/W), Phase (Bidding/Playing/Finished), Vulnerability
+├── config.rs            # Settings (YAML), SavedGame/GameRecord (JSON), file I/O
 ├── engine/
 │   ├── mod.rs           # Module re-exports
 │   ├── card.rs          # Suit, Rank, Card (Ord, Hash, Serialize), Card::from_ascii()
@@ -34,18 +34,21 @@ src/
 │   ├── play.rs          # PlayState: trick management, eligible cards, follow-suit rules
 │   ├── scoring.rs       # Score: contract/overtrick/bonus points, undertrick penalties
 │   ├── game.rs          # Game: full state machine (deal → bid → play → score), Game::from_hands()
-│   └── tests.rs         # 96 tests covering all engine logic
+│   ├── bid_constraints.rs  # SAYC bid constraint extraction → HandConstraints (HCP/suit-length ranges)
+│   ├── inference.rs     # Monte Carlo + exact inference engine → CardProbabilities
+│   └── tests.rs         # 116 tests covering all engine logic
 ├── agent/
 │   ├── mod.rs           # AgentBackend trait, ClaudeApi/ClaudeCli backends, AgentController
 │   ├── prompt.rs        # AgentGameView, system/bidding/play prompt construction (SAYC)
 │   ├── parse.rs         # Parse LLM text → Bid or Card (flexible format matching)
 │   └── tutor.rs         # TutorController: background LLM tutor (API/CLI backends, conversation history)
 └── ui/
-    ├── mod.rs           # AppState: game + UI state (selection indices, status messages, agent_errors)
+    ├── mod.rs           # AppState: game + UI state (selection indices, status messages, inference state)
     ├── board.rs         # 3×3 grid layout: hands at compass positions, center trick area, panels
     ├── bid_selector.rs  # 7×5 bid grid (levels × suits) + Pass/Double/Redouble row
     ├── bidding_panel.rs # Auction history as 4-column table (N/E/S/W)
     ├── trick_history.rs # Scrollable trick log with winner highlights
+    ├── probability_grid.rs  # Per-seat honor/distribution/confidence grid (toggled with M)
     ├── tutor.rs         # TutorState + render_tutor_pane: input, response, markdown/card parsing
     ├── review.rs        # ReviewState + compact board: step-through review of completed games with tutor
     ├── score_panel.rs   # Score breakdown panel (trick counts, result, points)
@@ -69,7 +72,7 @@ src/
 `AgentController` (agent/mod.rs) manages background threads via mpsc channels. The channel sends `AgentResult` which includes the action plus any errors encountered during retries.
 
 Two backends implement `AgentBackend` trait:
-- **ClaudeApiBackend**: blocking reqwest to Anthropic Messages API (64 max_tokens)
+- **ClaudeApiBackend**: blocking reqwest to Anthropic Messages API (512 max_tokens)
 - **ClaudeCliBackend**: `claude` CLI subprocess
 
 LLM calls run in background threads with 3 retries; after exhausting retries, falls back to a safe default (Pass during bidding, first eligible card during play). Errors are surfaced to the UI via `AppState.agent_errors` and displayed in the bottom-left panel. `detect_backend()` auto-selects: API key present → API, `claude` CLI available → CLI, otherwise panics. No CLI arguments — all configuration via `settings.yaml` and env vars.
@@ -77,7 +80,7 @@ LLM calls run in background threads with 3 retries; after exhausting retries, fa
 ### Prompt Structure
 - System prompt sets role (bidder/declarer/defender) and includes a full SAYC reference (`SAYC_REFERENCE` constant in prompt.rs).
 - Bidding prompt includes hand, HCP, history, valid bids, plus **situational reminders** — `build_situational_reminder()` detects auction triggers (partner opened 1NT, Stayman, Jacoby Transfer, Blackwood, etc.) and injects hand-aware nudges.
-- Play prompt includes contract, hands (own + visible dummy), tricks, eligible cards.
+- Play prompt includes contract, hands (own + visible dummy), tricks, eligible cards, vulnerability.
 
 ### Human Control and Turn Logic
 `is_agent_turn()` (app.rs) is the central gate for who acts. During **bidding**, only South is human. During **play**, South is always human-controlled. When N/S declares, the human also controls North:
@@ -88,10 +91,20 @@ LLM calls run in background threads with 3 retries; after exhausting retries, fa
 
 When North is declarer, North's hand cell hides the "Agent: ..." status during play since the human controls it.
 
+### Probability Inference System
+Toggle with `M` key. Runs in background thread via `dispatch_inference()` / `tick_inference()` (app.rs).
+
+- **`bid_constraints.rs`**: Parses auction history to extract `HandConstraints` per seat — HCP ranges, suit-length min/max, voids, aces (from Blackwood). Uses full SAYC pattern matching.
+- **`inference.rs`**: `run_inference()` takes constraints + play history → `CardProbabilities`. Uses exact enumeration for small cases (≤20 remaining, 2 unknown seats), Monte Carlo sampling otherwise. Includes adaptive constraint relaxation when acceptance rate is too low, and a fallback weighted distribution.
+- **`probability_grid.rs`**: Renders per-seat honor grid (A/K/Q/J per suit), suit-length histogram bar, 80% HDI range, and confidence level (Low/Med/High).
+- **`AppState.inference`**: Holds `InferenceState { probs, fingerprint, pending }` — fingerprint prevents redundant recomputation.
+
+See ARCHITECTURE.md for algorithm details.
+
 ### Tutor System
 In-game AI tutor panel in the right sidebar. Activated with `T`, provides bidding/play advice.
 
-**Backend** (`agent/tutor.rs`): `TutorController` with `TutorBackend` enum (API or CLI). Separate from `AgentController` — uses `max_tokens: 1024` (vs 64 for agents), returns free-text, independent lifecycle. Backend selection in `main.rs`: API key → API, `claude` CLI available → CLI, otherwise tutor unavailable. Multi-turn conversation history via `Vec<TutorMessage>` — exchanges recorded on `try_recv()`, cleared on `reset()` (new game/reactivation).
+**Backend** (`agent/tutor.rs`): `TutorController` with `TutorBackend` enum (API or CLI). Separate from `AgentController` — uses `max_tokens: 1024` (vs 512 for agents), returns free-text, independent lifecycle. Backend selection in `main.rs`: API key → API, `claude` CLI available → CLI, otherwise tutor unavailable. Multi-turn conversation history via `Vec<TutorMessage>` — exchanges recorded on `try_recv()`, cleared on `reset()` (new game/reactivation).
 
 **UI** (`ui/tutor.rs`): `TutorState` holds input, cursor, response, scroll, pending state, `last_auto_turn` fingerprint. Right panel splits 50/50 when tutor active (top: bid selector/tricks, bottom: tutor pane). Tutor pane: title + scrollable response + 4-line bordered input box. Response text is parsed for `**bold**`/`*italic*` markdown and ASCII card mentions (e.g., `AS` → `A♠` with colored suit symbol).
 
@@ -101,15 +114,12 @@ In-game AI tutor panel in the right sidebar. Activated with `T`, provides biddin
 
 **Keys**: `T` toggle tutor, `Tab` focus input, `Esc` close/unfocus, `Enter` submit question, `PageUp/PageDown` scroll response. When input is focused, all character keys route to text input (including `?` which otherwise opens help).
 
-### Custom Instructions (North only)
-`NorthAgent` in config.rs has a `custom_instructions` field. When non-empty, it **replaces** the default SAYC system prompt, letting the user fine-tune their partner's style. East/West (`SeatAgent`) have model only — they always use the standard SAYC prompt.
-
 ### Card Display Format
 Cards use rank-first format: `A♠`, `T❤`, `4♦` (display with unicode suits) / `AS`, `TH`, `4D` (ASCII in agent prompts). Cards stored low-to-high internally, displayed high-to-low. Arrow keys inverted accordingly (Right = idx-1, Left = idx+1). Suit symbols use standard Unicode characters (♣♦♥♠). Only the suit symbol is colored (red/black); rank characters use the text foreground color.
 
 ### UI Layout
 3×3 grid with right sidebar (38 chars wide):
-- **Top-left**: Stats panel (dealer, status, contract, lead, system, turn)
+- **Top-left**: Stats panel (dealer, status, contract, lead, system, turn, vulnerability)
 - **Top-center**: North's hand
 - **Top-right**: Auction history
 - **Mid-left/center/right**: West, center trick area, East
@@ -133,7 +143,7 @@ Step-through review of completed games from the Library. Selecting a completed g
 **Keys**: `←/→` step through, `T` ask tutor, `PageUp/PageDown` scroll tutor response, `Esc` close review.
 
 ### Persistence
-- `SavedGame` (config.rs) wraps full serialized `Game` state + metadata (timestamps, favorite flag)
+- `SavedGame` (config.rs) wraps full serialized `Game` state + metadata (timestamps, favorite flag, vulnerability)
 - In-progress games auto-save; completed games get a `GameRecord` with score breakdown
 - Library UI supports filtering (in-progress/completed), favorites, resume, delete
 
@@ -149,6 +159,17 @@ Chicago-style deals with vulnerability tracked per deal.
 - Undertricks doubled: NV 100/200/300 progressive; V 200/300/300
 - Undertricks redoubled: NV 200/400/600 progressive; V 400/600/600
 
+## Vulnerability (Chicago-style)
+- `Vulnerability` enum in `types.rs`: `None`, `NorthSouth`, `EastWest`, `Both`
+- `Vulnerability::chicago(deal_number, dealer)` computes per-deal vulnerability:
+  - Deal 0: None, Deal 1: Dealer's side, Deal 2: Both, Deal 3: Non-dealer's side (repeats)
+- `App.deal_number` tracks the current deal (0-indexed, increments each `new_game()`)
+- `Game.vulnerability` field stores the deal's vulnerability (serialized with `#[serde(default)]` for backward compat)
+- Scoring uses `vulnerability.is_vulnerable(declarer)` to determine penalties/bonuses
+- Stats panel shows "Vul: None/N-S/E-W/Both" with red accent when anyone is vulnerable
+- Agent prompts include vulnerability status in both bidding and play phases
+- `SavedGame.vulnerability` persists vulnerability; old saves default to `None`
+
 ## Style Conventions
 - Suit colors apply only to suit symbols, not rank characters
 - Stats panel values are non-bold
@@ -160,15 +181,3 @@ Chicago-style deals with vulnerability tracked per deal.
 - Library screen uses muted blue palette (`ACCENT_MUTED_BLUE`, `BG_SELECTED_BLUE`) — not gold
 - Library status column uses default row text color; only "✓ Done" uses `ACCENT_GREEN`
 - `Hand::hcp()` is the single source of HCP calculation — do not duplicate
-
-## Vulnerability (Chicago-style)
-- `Vulnerability` enum in `types.rs`: `None`, `NorthSouth`, `EastWest`, `Both`
-- `Vulnerability::chicago(deal_number, dealer)` computes per-deal vulnerability:
-  - Deal 0: None, Deal 1: Dealer's side, Deal 2: Both, Deal 3: Non-dealer's side (repeats)
-- `App.deal_number` tracks the current deal (0-indexed, increments each `new_game()`)
-- `Game.vulnerability` field stores the deal's vulnerability (serialized with `#[serde(default)]` for backward compat)
-- Scoring uses `vulnerability.is_vulnerable(declarer)` to determine penalties/bonuses
-- Vulnerable differences: game bonus 500 (vs 300), slam 750/1500 (vs 500/1000), undertricks 100 (vs 50), doubled/redoubled penalties higher
-- Stats panel shows "Vul: None/N-S/E-W/Both" with red accent when anyone is vulnerable
-- Agent prompts include vulnerability status in both bidding and play phases
-- `SavedGame.vulnerability` persists vulnerability; old saves default to `None`

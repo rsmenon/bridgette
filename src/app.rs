@@ -1,3 +1,5 @@
+use std::sync::mpsc::{self, Receiver, Sender};
+use std::thread;
 use std::time::Instant;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
@@ -11,9 +13,11 @@ use ratatui::Frame;
 use crate::agent::tutor::TutorController;
 use crate::agent::{AgentAction, AgentController};
 use crate::config::{self, GameStatus, SavedGame, Settings};
+use crate::engine::bid_constraints::{self, HandConstraints};
 use crate::engine::bidding::Bid;
 use crate::engine::card::{Card, Rank};
 use crate::engine::game::Game;
+use crate::engine::inference::{self, CardProbabilities};
 use crate::types::{Phase, Seat, Vulnerability};
 use crate::ui::bid_selector::{bid_at_index, render_bid_selector, BID_GRID_SIZE};
 use crate::ui::board::render_board;
@@ -24,7 +28,7 @@ use crate::ui::palette::*;
 use crate::ui::review::{build_review_question, pre_step_game_and_seat, render_review_panel, ReviewState};
 use crate::ui::trick_history::render_trick_history;
 use crate::ui::tutor::render_tutor_pane;
-use crate::ui::{AgentInfo, AppState, TutorState};
+use crate::ui::{AgentInfo, AppState, InferenceState, TutorState};
 
 const MIN_WIDTH: u16 = 80;
 const MIN_HEIGHT: u16 = 24;
@@ -57,6 +61,13 @@ pub struct App {
     pub review_state: Option<ReviewState>,
     /// Chicago-style deal number (0-indexed, increments each new game).
     pub deal_number: u32,
+    /// Channel for receiving inference results from background threads.
+    inference_rx: Receiver<CardProbabilities>,
+    inference_tx: Sender<CardProbabilities>,
+    /// Fingerprint of the last dispatched inference computation.
+    inference_fingerprint: Option<usize>,
+    /// Whether an inference computation is currently running.
+    inference_pending: bool,
 }
 
 fn format_timestamp() -> String {
@@ -170,6 +181,7 @@ impl App {
                 settings.agents.west.model.clone(),
             ],
         };
+        let (inference_tx, inference_rx) = mpsc::channel();
         Self {
             state: AppState {
                 game: Game::new(Seat::random(), Vulnerability::None),
@@ -185,6 +197,8 @@ impl App {
                 bidding_system: "SAYC".to_string(),
                 agent_errors: Vec::new(),
                 tutor: None,
+                inference: None,
+                show_probabilities: false,
             },
             should_quit: false,
             agent,
@@ -197,6 +211,10 @@ impl App {
             tutor_controller,
             review_state: None,
             deal_number: 0,
+            inference_rx,
+            inference_tx,
+            inference_fingerprint: None,
+            inference_pending: false,
         }
     }
 
@@ -217,6 +235,7 @@ impl App {
         self.state.agent_thinking = None;
         self.state.agent_errors = Vec::new();
         self.state.tutor = None;
+        self.state.inference = None;
         self.state.game_started_at = format_timestamp();
         self.state.game_ended_at = None;
         self.game_saved = false;
@@ -227,6 +246,10 @@ impl App {
         if let Some(ref mut tc) = self.tutor_controller {
             tc.reset();
         }
+        self.inference_fingerprint = None;
+        self.inference_pending = false;
+        // Drain stale inference results
+        while self.inference_rx.try_recv().is_ok() {}
         self.state.set_status("New game started");
     }
 
@@ -421,6 +444,7 @@ impl App {
                     self.state.show_help = false;
                     self.state.agent_thinking = None;
                     self.state.tutor = None;
+                    self.state.inference = None;
                     self.state.game_started_at = format_timestamp();
                     self.state.game_ended_at = None;
                     self.game_saved = false;
@@ -431,6 +455,9 @@ impl App {
                     if let Some(ref mut tc) = self.tutor_controller {
                         tc.reset();
                     }
+                    self.inference_fingerprint = None;
+                    self.inference_pending = false;
+                    while self.inference_rx.try_recv().is_ok() {}
                     self.state.set_status("Game resumed");
                 }
                 Err(e) => {
@@ -505,7 +532,7 @@ impl App {
         // Check for completed agent action
         if let Some(result) = self.agent.try_recv() {
             self.state.agent_thinking = None;
-            // Surface any agent errors to the UI
+            // Surface any agent errors to the UI; clear on clean run
             if !result.errors.is_empty() {
                 self.state.agent_errors.extend(result.errors);
                 // Keep only the most recent errors to prevent unbounded growth
@@ -514,6 +541,8 @@ impl App {
                     let drain = self.state.agent_errors.len() - MAX_ERRORS;
                     self.state.agent_errors.drain(..drain);
                 }
+            } else {
+                self.state.agent_errors.clear();
             }
             // Clear any previous error/status when agent acts successfully
             self.state.status_message = None;
@@ -577,6 +606,98 @@ impl App {
                 self.agent.dispatch(&self.state.game, seat);
             }
         }
+    }
+
+    /// Called each frame to poll inference results and dispatch new computations.
+    pub fn tick_inference(&mut self) {
+        if self.mode != AppMode::Game || !self.game_active {
+            return;
+        }
+        if !self.state.show_probabilities {
+            return;
+        }
+        if self.state.game.phase == Phase::Finished {
+            return;
+        }
+
+        // Poll for completed inference result
+        if let Ok(probs) = self.inference_rx.try_recv() {
+            self.inference_pending = false;
+            let fp = self.inference_fingerprint.unwrap_or(0);
+            self.state.inference = Some(InferenceState {
+                probabilities: Some(probs),
+                fingerprint: fp,
+                pending: false,
+            });
+        }
+
+        // Compute fingerprint: bids + cards played
+        let cards_played = self.state.game.play_state.as_ref()
+            .map(|p| p.tricks.iter().map(|t| t.cards.len()).sum::<usize>() + p.current_trick.cards.len())
+            .unwrap_or(0);
+        let fingerprint = self.state.game.auction.bids.len() + cards_played;
+
+        // Only dispatch if fingerprint changed and no computation pending
+        if self.inference_pending {
+            return;
+        }
+        if self.inference_fingerprint == Some(fingerprint) {
+            return;
+        }
+        // Don't run inference before cards are dealt
+        if self.state.game.hands.iter().all(|h| h.is_empty()) {
+            return;
+        }
+
+        self.inference_fingerprint = Some(fingerprint);
+        self.inference_pending = true;
+
+        // Build constraints from bidding
+        let game = &self.state.game;
+        let constraints: [HandConstraints; 4] = std::array::from_fn(|i| {
+            let seat = Seat::ALL[i];
+            bid_constraints::constraints_from_bids(seat, &game.auction.bids, game.vulnerability)
+        });
+
+        let south_hand = game.hand(Seat::South).clone();
+        let (dummy_hand, dummy_seat) = if let Some(contract) = &game.contract {
+            if game.dummy_revealed {
+                if contract.declarer.is_ns() {
+                    // N/S declaring: South is already known via south_hand.
+                    // Pass North's hand as the "dummy" so inference treats it
+                    // as known too — the human controls and sees both hands.
+                    (Some(game.hand(Seat::North).clone()), Some(Seat::North))
+                } else {
+                    // E/W declaring: dummy is North (partner of declarer).
+                    (Some(game.hand(contract.dummy).clone()), Some(contract.dummy))
+                }
+            } else {
+                (None, None)
+            }
+        } else {
+            (None, None)
+        };
+
+        let tricks = game.play_state.as_ref()
+            .map(|p| p.tricks.clone())
+            .unwrap_or_default();
+        let current_trick = game.play_state.as_ref()
+            .map(|p| p.current_trick.clone())
+            .unwrap_or_else(|| crate::engine::trick::Trick::new(Seat::North));
+
+        let tx = self.inference_tx.clone();
+        thread::spawn(move || {
+            let result = inference::run_inference(
+                &south_hand,
+                dummy_hand.as_ref(),
+                dummy_seat,
+                &constraints,
+                &tricks,
+                &current_trick,
+                2000,
+            );
+            let _ = tx.send(result);
+        });
     }
 
     /// Called each frame to poll tutor LLM responses and auto-dispatch recommendations.
@@ -806,7 +927,7 @@ impl App {
         if self.game_active && self.state.game.phase == Phase::Bidding {
             let sections = Layout::vertical([
                 Constraint::Length(1), // Title
-                Constraint::Min(8),   // Bid selector
+                Constraint::Min(8),    // Bid selector
             ])
             .split(game_area);
 
@@ -842,7 +963,7 @@ impl App {
             Line::from(Span::styled(
                 " Keyboard Controls ",
                 Style::default()
-                    .fg(ACCENT_GOLD)
+                    .fg(ACCENT_MUTED_BLUE)
                     .add_modifier(Modifier::BOLD),
             )),
             Line::from(""),
@@ -1107,6 +1228,9 @@ impl App {
                         self.activate_tutor();
                     }
                 }
+                KeyCode::Char('b') | KeyCode::Char('B') => {
+                    self.state.show_probabilities = !self.state.show_probabilities;
+                }
                 KeyCode::Esc if tutor_active => self.deactivate_tutor(),
                 _ => self.handle_bidding_key(key.code),
             }
@@ -1116,9 +1240,6 @@ impl App {
         match key.code {
             KeyCode::Char('q') | KeyCode::Char('Q') => {
                 self.mode = AppMode::ConfirmQuit;
-            }
-            KeyCode::Char('h') | KeyCode::Char('H') => {
-                self.state.show_help = !self.state.show_help;
             }
             KeyCode::Char('n') | KeyCode::Char('N') => {
                 self.new_game();
@@ -1132,6 +1253,9 @@ impl App {
                 } else {
                     self.activate_tutor();
                 }
+            }
+            KeyCode::Char('b') | KeyCode::Char('B') => {
+                self.state.show_probabilities = !self.state.show_probabilities;
             }
             KeyCode::Esc if tutor_active => self.deactivate_tutor(),
             _ => match self.state.game.phase {
@@ -1264,28 +1388,12 @@ impl App {
                 let level = c as u8 - b'0';
                 let valid_bids = self.state.game.auction.valid_bids();
                 let base = (level as usize - 1) * 5;
-                let col = (0..5)
-                    .find(|&si| {
-                        let bid = bid_at_index(base + si);
-                        bid.is_some_and(|b| valid_bids.contains(&b))
-                    })
-                    .unwrap_or(0);
-                self.state.selected_bid_index = base + col;
-            }
-            KeyCode::Char('c') | KeyCode::Char('C') => {
-                self.select_bid_suit_col(0); // Clubs
-            }
-            KeyCode::Char('d') | KeyCode::Char('D') => {
-                self.select_bid_suit_col(1); // Diamonds
-            }
-            KeyCode::Char('h') | KeyCode::Char('H') => {
-                self.select_bid_suit_col(2); // Hearts
-            }
-            KeyCode::Char('s') | KeyCode::Char('S') => {
-                self.select_bid_suit_col(3); // Spades
-            }
-            KeyCode::Char('n') | KeyCode::Char('N') => {
-                self.select_bid_suit_col(4); // NoTrump
+                if let Some(col) = (0..5).find(|&si| {
+                    let bid = bid_at_index(base + si);
+                    bid.is_some_and(|b| valid_bids.contains(&b))
+                }) {
+                    self.state.selected_bid_index = base + col;
+                }
             }
             KeyCode::Right => {
                 if self.state.selected_bid_index < BID_GRID_SIZE - 1 {
@@ -1326,28 +1434,6 @@ impl App {
     }
 
     /// Move selection to the given suit column in the current bid row.
-    fn select_bid_suit_col(&mut self, col: usize) {
-        let idx = self.state.selected_bid_index;
-        if idx < 35 {
-            // In the 7x5 grid — keep current row, change column
-            let row = idx / 5;
-            self.state.selected_bid_index = row * 5 + col;
-        } else {
-            // On the special row — jump to the lowest valid row for this suit
-            let valid_bids = self.state.game.auction.valid_bids();
-            for row in 0..7 {
-                let target = row * 5 + col;
-                if let Some(bid) = bid_at_index(target) {
-                    if valid_bids.contains(&bid) {
-                        self.state.selected_bid_index = target;
-                        return;
-                    }
-                }
-            }
-            // No valid bid in that suit column — stay put
-        }
-    }
-
     fn try_place_bid(&mut self, bid: Bid) {
         if !self.state.game.auction.is_valid_bid(&bid) {
             self.state.set_status(format!("Invalid bid: {}", bid));

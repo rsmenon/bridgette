@@ -10,6 +10,7 @@ use crate::types::{Phase, Seat, Vulnerability};
 
 use super::bidding_panel::render_bidding_history;
 use super::palette::*;
+use super::probability_grid::render_probability_grid;
 use super::score_panel::render_score_panel;
 use super::AppState;
 
@@ -74,12 +75,12 @@ fn render_stats_panel(f: &mut Frame, area: Rect, state: &AppState) {
 
     let (status_str, status_color) = match state.game.phase {
         Phase::Finished => ("Completed", ACCENT_GREEN),
-        Phase::Playing => ("Play", ACCENT_TEAL),
+        Phase::Playing => ("Play", ACCENT_MUTED_BLUE),
         Phase::Bidding => {
             if state.game.hands.iter().all(|h| h.is_empty()) {
                 ("Not Started", TEXT_LIGHT_MUTED)
             } else {
-                ("Auction", ACCENT_TEAL)
+                ("Auction", ACCENT_MUTED_BLUE)
             }
         }
     };
@@ -136,9 +137,10 @@ fn render_stats_panel(f: &mut Frame, area: Rect, state: &AppState) {
     }
 
     if let Some(ref ended) = state.game_ended_at {
+        let date = &ended[..ended.len().min(10)];
         table_rows.push(Row::new(vec![
             Cell::from("Ended").style(label_style),
-            Cell::from(ended.as_str()).style(value_style),
+            Cell::from(date.to_string()).style(value_style),
         ]));
     }
 
@@ -238,12 +240,12 @@ fn render_hand_cell(f: &mut Frame, area: Rect, seat: Seat, state: &AppState) {
 
     let bg = if is_current { BG_CONTENT_ACTIVE } else { BG_CONTENT };
     let block = Block::default()
-        .padding(Padding::new(1, 1, 1, 1))
+        .padding(Padding::new(1, 1, 0, 1))
         .style(Style::default().bg(bg));
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    // Player location label inside the pane
+    // Player location label inside the pane (row 0 of inner)
     let title_color = TEXT_DARK;
     let title_line = Line::from(Span::styled(
         format!("{}", seat),
@@ -261,12 +263,13 @@ fn render_hand_cell(f: &mut Frame, area: Rect, seat: Seat, state: &AppState) {
         f.render_widget(Paragraph::new(title_line), title_area);
     }
 
-    // Content area below title + 1 line spacing
+    // Add spacing after title for visible hands (South, dummy, all when finished)
+    let title_gap: u16 = if seat == Seat::South || game.phase == Phase::Finished || visible { 1 } else { 0 };
     let content = Rect {
         x: inner.x,
-        y: inner.y + 2,
+        y: inner.y + 1 + title_gap,
         width: inner.width,
-        height: inner.height.saturating_sub(2),
+        height: inner.height.saturating_sub(1 + title_gap),
     };
 
     // Determine what to show below cards
@@ -276,7 +279,7 @@ fn render_hand_cell(f: &mut Frame, area: Rect, seat: Seat, state: &AppState) {
 
     let bottom_height: u16 = if show_hand_score || show_agent_status { 2 } else { 0 };
     let sections = Layout::vertical([
-        Constraint::Min(4),              // Cards area
+        Constraint::Min(5),              // Cards area (5 for probability grid header)
         Constraint::Length(bottom_height), // Score or agent info
     ])
     .split(content);
@@ -295,17 +298,27 @@ fn render_hand_cell(f: &mut Frame, area: Rect, seat: Seat, state: &AppState) {
             render_hand_score(f, sections[1], hand);
         }
     } else {
-        let count = game.hand(seat).len();
-        let text = format!("[{} cards]", count);
-        let v_center = Layout::vertical([
-            Constraint::Min(0),
-            Constraint::Length(1),
-            Constraint::Min(0),
-        ])
-        .split(sections[0]);
-        let para = Paragraph::new(text)
-            .style(Style::default().fg(TEXT_DARK_MUTED).bg(bg).add_modifier(Modifier::DIM));
-        f.render_widget(para, v_center[1]);
+        // Hidden hand — show probability grid if available, else card count
+        let show_grid = state.show_probabilities
+            && state.inference.as_ref().and_then(|inf| inf.probabilities.as_ref()).is_some();
+
+        if show_grid {
+            let inf = state.inference.as_ref().unwrap();
+            let probs = inf.probabilities.as_ref().unwrap();
+            render_probability_grid(f, sections[0], seat, probs, bg);
+        } else {
+            let count = game.hand(seat).len();
+            let text = format!("[{} cards]", count);
+            let v_center = Layout::vertical([
+                Constraint::Min(0),
+                Constraint::Length(1),
+                Constraint::Min(0),
+            ])
+            .split(sections[0]);
+            let para = Paragraph::new(text)
+                .style(Style::default().fg(TEXT_DARK_MUTED).bg(bg).add_modifier(Modifier::DIM));
+            f.render_widget(para, v_center[1]);
+        }
     }
 
     if show_agent_status {
@@ -337,7 +350,7 @@ fn render_agent_status(f: &mut Frame, area: Rect, seat: Seat, state: &AppState) 
     } else {
         Line::from(Span::styled(
             "Ready",
-            Style::default().fg(ACCENT_SAGE),
+            Style::default().fg(ACCENT_MUTED_BLUE),
         ))
     };
 
@@ -365,10 +378,13 @@ fn hand_lines(hand: &Hand, seat: Seat, state: &AppState) -> Vec<Line<'static>> {
             SUIT_BLACK
         };
 
-        let mut spans = vec![Span::styled(
-            format!("{}  ", suit.symbol()),
-            Style::default().fg(suit_color).add_modifier(Modifier::BOLD),
-        )];
+        let mut spans = vec![
+            Span::styled(
+                suit.symbol().to_string(),
+                Style::default().fg(suit_color).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("│", Style::default().fg(TEXT_DARK_DISABLED)),
+        ];
 
         if cards.is_empty() {
             spans.push(Span::styled("—", Style::default().fg(TEXT_DARK_DISABLED).add_modifier(Modifier::DIM)));
@@ -386,7 +402,7 @@ fn hand_lines(hand: &Hand, seat: Seat, state: &AppState) -> Vec<Line<'static>> {
                 let card_style = if is_selected {
                     Style::default()
                         .fg(TEXT_DARK)
-                        .bg(ACCENT_TEAL)
+                        .bg(ACCENT_MUTED_BLUE)
                         .add_modifier(Modifier::BOLD)
                 } else if is_current_player && !is_eligible {
                     Style::default().fg(TEXT_DARK_DISABLED)
@@ -534,12 +550,12 @@ fn thinking_braille_line(elapsed: std::time::Duration) -> Line<'static> {
         Span::styled(
             format!("{} ", symbol),
             Style::default()
-                .fg(ACCENT_TEAL)
+                .fg(ACCENT_MUTED_BLUE)
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(
             "Thinking...",
-            Style::default().fg(ACCENT_TEAL).add_modifier(Modifier::BOLD),
+            Style::default().fg(ACCENT_MUTED_BLUE).add_modifier(Modifier::BOLD),
         ),
     ])
 }

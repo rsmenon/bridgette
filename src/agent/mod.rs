@@ -143,9 +143,6 @@ pub struct AgentController {
     rx: Receiver<AgentResult>,
     pub pending: bool,
     pub pending_seat: Option<Seat>,
-    /// Custom system instructions for North. When non-empty, replaces the
-    /// default SAYC system prompt for the North agent only.
-    north_custom_instructions: Option<String>,
 }
 
 impl AgentController {
@@ -157,15 +154,6 @@ impl AgentController {
             rx,
             pending: false,
             pending_seat: None,
-            north_custom_instructions: None,
-        }
-    }
-
-    pub fn set_north_custom_instructions(&mut self, instructions: String) {
-        if instructions.is_empty() {
-            self.north_custom_instructions = None;
-        } else {
-            self.north_custom_instructions = Some(instructions);
         }
     }
 
@@ -195,14 +183,9 @@ impl AgentController {
         let tx = self.tx.clone();
         let phase = game.phase;
         let contract = game.contract;
-        let custom = if seat == Seat::North {
-            self.north_custom_instructions.clone()
-        } else {
-            None
-        };
 
         thread::spawn(move || {
-            let system = build_system_prompt(seat, contract.as_ref(), custom.as_deref());
+            let system = build_system_prompt(seat, contract.as_ref());
             let base_prompt = match phase {
                 Phase::Bidding => build_bidding_prompt(&view),
                 Phase::Playing => build_play_prompt(&view),
