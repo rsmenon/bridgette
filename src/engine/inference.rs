@@ -251,8 +251,18 @@ fn adjust_constraints_for_play(
     constraints: &[HandConstraints; 4],
     played: &[(Seat, Card)],
     unknown_seats: &[Seat],
+    voids: &[Vec<Suit>; 4],
 ) -> [HandConstraints; 4] {
     let mut adjusted = constraints.clone();
+
+    // Pin void suits to exactly 0 remaining cards — these are facts observed
+    // from play (player discarded a different suit), not inferences.
+    for &seat in unknown_seats {
+        for &void_suit in &voids[seat.index()] {
+            let si = suit_index(void_suit);
+            adjusted[seat.index()].suit_lengths[si] = (0, 0);
+        }
+    }
 
     for &seat in unknown_seats {
         let seat_played: Vec<&Card> = played.iter()
@@ -813,7 +823,7 @@ pub fn run_inference(
     // Bid constraints describe the original 13-card hand, but the sampler deals
     // only remaining cards. Subtract played HCP and suit counts so the constraints
     // apply correctly to the reduced hand.
-    let adjusted_constraints = adjust_constraints_for_play(constraints, &played, &unknown_seats);
+    let adjusted_constraints = adjust_constraints_for_play(constraints, &played, &unknown_seats, &voids);
 
     // Pre-compute which seats can hold each card (void + constraint filtering)
     let eligible_per_card = compute_eligible_seats(&pool, &unknown_seats, &voids, &adjusted_constraints);
